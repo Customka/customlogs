@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         CustomLogs — Rodina RP
 // @namespace    customlogs.rodina
-// @version      5.0.0
-// @description  Фильтры (Пробив, Махинатор, Вирты, Онлайн), Логи, профиль, анимации, фон логов, кастомизация, обновления
+// @version      5.2.0
+// @description  Поиск (Пробив, Махинатор, Вирты), Лог Проверки, профиль, анимации, фон логов, кастомизация, обновления
 // @match        https://rodina.logsparser.info/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -16,29 +16,32 @@
 (function () {
   'use strict';
 
+  // Если пользователь удалил аккаунт и скрипт, при следующем запуске ничего не делаем
+  if (GM_getValue('cl_deleted', false)) return;
+
   /* ================= НАСТРОЙКИ ================= */
-  const VERSION = 'v5.0.0';
-  const VERSION_NUM = '5.0.0';   // держи равным @version в заголовке
+  const VERSION = 'v5.2.0';
+  const VERSION_NUM = '5.2.0';   // держи равным @version в заголовке
   const UPDATE_URL = 'https://raw.githubusercontent.com/Customka/customlogs/main/customlogs.user.js';
   const OWNER_NICK = 'without_custom';
   const OWNER_PASS = '124578';
 
-  /* ---------- КАРТИНКИ ----------
-     Сюда вставляй картинки персонажей с вырезанным фоном (PNG/WebP):
-     либо data:image/webp;base64,... либо прямую ссылку на файл (https://.../name.png).
-     Пока поле img пустое, показывается простая заглушка с буквой.
-     MECH_IMG — прямая ссылка на картинку «Цепь Махинатор» (ссылка из поиска Google не подходит,
-     нужен адрес самого файла .png/.jpg/.webp). Если пусто — показывается эмодзи ⛓️. */
+  /* ---------- ПЕРСОНАЖИ (иконка запуска и режим) ----------
+     img — ссылка на картинку персонажа. Если нужна версия без фона, вставь сюда PNG/WebP (data:... или https://...). */
   const MECH_IMG = '';
   const CHARS = [
-    { id: 'makima', name: 'Макима', short: 'Макима', female: true, bg: '#7f1d1d', img: '',
-      theme: { accent: '#dc2626', panel: '#120607', hover: '#dc2626' } },
-    { id: 'aizen', name: 'Айзен Соскэ', short: 'Айзен', female: false, bg: '#4c1d95', img: '',
-      theme: { accent: '#a78bfa', panel: '#14101f', hover: '#a78bfa' } },
-    { id: 'kaneki', name: 'Кен Канеки', short: 'Канеки', female: false, bg: '#111111', img: '',
+    { id: 'makima', name: 'Макима', short: 'Макима', female: true, bg: '#7f1d1d',
+      img: 'https://www.mosigra.ru/image/cache/hobbygames_beta/data/predvaritelnie-tovari/bandai/figuarts/mini-makima-00-1024x1024.webp',
+      theme: { accent: '#dc2626', panel: '#0a0a0a', hover: '#ffffff' } },
+    { id: 'aizen', name: 'Айзен Соскэ', short: 'Айзен', female: false, bg: '#4a0e16',
+      img: 'https://www.mosigra.ru/image/cache/hobbygames_beta/data/predvaritelnie-tovari/funko-pop/anime/bleach/bleach-sosuke-aizen-1697-00-1000x416.webp',
+      theme: { accent: '#7f1d1d', panel: '#0a0a0a', hover: '#ffffff' } },
+    { id: 'kaneki', name: 'Кен Канеки', short: 'Канеки', female: false, bg: '#111111',
+      img: 'https://nendotoy.ru/wp-content/uploads/2025/12/tokyo-ghoul-kaneki-ken-nendoroid-2734-1.jpg',
       theme: { accent: '#ef4444', panel: '#000000', hover: '#ffffff' } },
-    { id: 'rebecca', name: 'Ребекка', short: 'Ребекка', female: true, bg: '#0e7490', img: '',
-      theme: { accent: { g: true, c1: '#22d3ee', c2: '#ec4899' }, panel: '#0a0a1a', hover: '#22d3ee' } },
+    { id: 'rebecca', name: 'Ребекка', short: 'Ребекка', female: true, bg: '#0e7490',
+      img: 'https://funkopoprussia.com/image/cache/data/Games/Cyberpunk-2077/funko-pop-russia-Rebecca-Cyberpunk-Edgerunners-2415-fu93276-2-500x500.png',
+      theme: { accent: { g: true, c1: '#39ff14', c2: '#22d3ee' }, panel: '#04120b', hover: '#f472b6' } },
   ];
   const phImg = (t, bg) => 'data:image/svg+xml;utf8,' + encodeURIComponent(
     `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="160" viewBox="0 0 120 160"><rect width="120" height="160" rx="22" fill="${bg || '#27272a'}"/><text x="60" y="98" font-size="64" text-anchor="middle" fill="#fff" font-family="Arial">${t}</text></svg>`);
@@ -53,16 +56,17 @@
   const UPD_RED_DAYS = 30;
   const STREAK_RESET_DAYS = 7;
   const STREAK_PROTECT = 200;
-  const CD_OPTIONS = [5, 10, 15, 20];
-  const PER_OPTIONS = [150, 300, 500, 1000];
   const MAX_RETRY_429 = 4;
   const ROW_CAP = 20000;
   const MAX_RENDER = 3000;
   const JOBS_CAP = 30;
   const SAVE_EVERY = 5;
   const DAY_MS = 86400000;
-  const POPUP_MS = 8000;
+  const POPUP_MS = 15000;
+  const WARN_MS = 15000;
   const FILE_CD_MS = 5000;
+  const MAX_UPLOAD_MB = 20;
+  const CD_MIN = 0.5, CD_MAX = 60, CD_DEF = 3;
   const WARN_TEXT = 'Скрипт — неофициальное дополнение к сайту логов. Автор (Without Custom) не несёт ответственности за последствия его использования. Не злоупотребляй массовыми запросами, соблюдай правила сервера и не передавай свой аккаунт посторонним.';
   const CRASH_TEXT = 'Ой, похоже сломалось, я на всякий случай скачала тебе файл, надеюсь поможет 😢';
   const WELCOME_TXT = 'Буду стараться и дальше улучшать скрипт, спасибо что выбрали наш продукт.\nС уважением, Разработчик CustomLogs!';
@@ -77,14 +81,6 @@
     ['Успех — это способность идти от неудачи к неудаче, не теряя энтузиазма.', 'Уинстон Черчилль'],
   ];
 
-  /* Как скрипт распознаёт строки для проверки «Онлайн». Подправь под реальные строки логов. */
-  const ON_IN_RE = /(зашел|зашёл|вошел|вошёл|подключил|авторизовал)/i;
-  const ON_OUT_RE = /(вышел|покинул|отключил)/i;
-  const ON_REP_RE = /репорт/i;
-
-  const IP_ALL = /\b\d{1,3}(?:[.,]\d{1,3}){3}\b/g;
-  const MONEY_TXT_RE = /\d[\d ,]*\s*(?:руб\.?|денег)/g;
-
   const TIERS = [
     { d: 0, c: '#6b7280', id: 'dim', name: 'огонёк ещё не набран' },
     { d: 10, c: '#9ca3af', id: 'grey', name: 'серый' },
@@ -92,24 +88,26 @@
     { d: 50, c: '#22c55e', id: 'green', name: 'зелёный' },
     { d: 100, c: '#facc15', id: 'yellow', name: 'жёлтый' },
     { d: 200, c: '#ef4444', id: 'red', name: 'красный' },
-    { d: 365, c: '#ef4444', id: 'grad', name: 'градиентный' },
+    { d: 365, c: '#ef4444', id: 'grad', name: 'разноцветный' },
   ];
   const POSITIONS = ['Главный Администратор', 'Заместитель ГА', 'Куратор', 'Администратор'];
-  const TEST_ROLES = ['Пользователь', ...POSITIONS];
+  const SELF_POSITIONS = ['Администратор', 'Куратор'];   // максимум, который можно выдать себе
+  const TEST_ROLES = ['Пользователь', ...POSITIONS, 'Разработчик'];
   const POS_VER = 2;
   const POS_CLS = { 'Главный Администратор': 'p-ga', 'Заместитель ГА': 'p-zga', 'Куратор': 'p-cur', 'Администратор': 'p-adm', 'Разработчик': 'p-dev', 'Пользователь': 'p-user' };
-  /* Что открывается каждой роли (используется и тестовым режимом разработчика) */
+  const ROLE_COLOR = { 'Разработчик': '#ef4444', 'Главный Администратор': '#22c55e', 'Заместитель ГА': '#4ade80', 'Куратор': '#a855f7', 'Администратор': '#3b82f6', 'Пользователь': '#9ca3af' };
   const BASE_TABS = ['home', 'settings', 'filters', 'logs', 'offer', 'update'];
   const STAFF_TABS = [...BASE_TABS, 'ivent'];
   const ROLE_ACCESS = {
     'Пользователь': { tabs: BASE_TABS, filters: ['probiv', 'virt'] },
     'Администратор': { tabs: STAFF_TABS, filters: ['probiv', 'mech', 'virt'] },
-    'Куратор': { tabs: STAFF_TABS, filters: ['probiv', 'mech', 'virt', 'online'] },
-    'Заместитель ГА': { tabs: STAFF_TABS, filters: ['probiv', 'mech', 'virt', 'online'] },
-    'Главный Администратор': { tabs: STAFF_TABS, filters: ['probiv', 'mech', 'virt', 'online'] },
-    'Разработчик': { tabs: [...STAFF_TABS, 'dev'], filters: ['probiv', 'mech', 'virt', 'online'] },
+    'Куратор': { tabs: STAFF_TABS, filters: ['probiv', 'mech', 'virt'] },
+    'Заместитель ГА': { tabs: STAFF_TABS, filters: ['probiv', 'mech', 'virt'] },
+    'Главный Администратор': { tabs: STAFF_TABS, filters: ['probiv', 'mech', 'virt'] },
+    'Разработчик': { tabs: [...STAFF_TABS, 'dev'], filters: ['probiv', 'mech', 'virt'] },
   };
   const LIMITS = [100, 500, 1000];
+  const PER_OPTIONS = [100, 200, 500, 1000];
   const SERVERS = [
     ['501', 'Центральный'], ['502', 'Южный'], ['503', 'Северный'], ['504', 'Восточный'],
     ['505', 'Западный'], ['506', 'Приморский'], ['507', 'Федеральный'],
@@ -119,7 +117,6 @@
     ['Черный', '#000000'], ['Белый', '#ffffff'], ['Красный', '#ef4444'],
     ['Темно-синий', '#1e3a8a'], ['Розовый', '#ec4899'], ['Фиолетовый', '#8b5cf6'],
   ];
-  /* Новый пользователь: белое меню. «Стоковый вид» — чёрное меню с белым контуром */
   const DEF_THEME = {
     accent: { g: false, c1: '#000000', c2: '#3b82f6' },
     panel: { g: false, c1: '#ffffff', c2: '#e5e7eb' },
@@ -132,9 +129,8 @@
   };
   const THEME_LABELS = { accent: 'Цвет менюшки', panel: 'Фон менюшки', hover: 'Наведение' };
   const FX_TYPES = [
-    ['off', 'Выкл', ''], ['star', 'Звёздочки', '⭐'], ['butterfly', 'Бабочки', '🦋'],
-    ['sun', 'Солнце', '☀️'], ['makima', 'Персонаж', ''], ['bolt', 'Молнии', '⚡'],
-    ['snow', 'Снежинки', '❄️'], ['bat', 'Летучие мыши', '🦇'],
+    ['off', 'Выкл', ''], ['bow', 'Бантики', '🎀'], ['sun', 'Солнце', '☀️'],
+    ['makima', 'Персонаж', ''], ['bolt', 'Молнии', '⚡'], ['snow', 'Снежинки', '❄️'], ['bat', 'Летучие мыши', '🦇'],
   ];
   const FX_COLORS = [
     ['auto', 'Авто (под фон)'], ['#ffffff', 'Белый'], ['#000000', 'Чёрный'], ['#9ca3af', 'Серый'],
@@ -146,70 +142,68 @@
     kw: { label: 'Ключевые слова' },
     type: { label: 'Тип запроса' },
   };
-  const MSG_ID = { probiv: '#cl-msg-p', mech: '#cl-msg-m', virt: '#cl-msg-v', online: '#cl-msg-o' };
+  const MSG_ID = { probiv: '#cl-msg-p', mech: '#cl-msg-m', virt: '#cl-msg-v' };
 
-  // История версий. Для каждого нового выпуска добавляй запись наверх.
+  // История версий. Для каждого нового выпуска добавляй запись наверх. Показываются последние 5.
   const CHANGELOG = [
     {
+      version: '5.2.0', date: '14.10.2026', items: [
+        { type: 'Добавлено', text: 'Логи: вверху итог найденных строк, подсветка сумм, AZ Coins, машин, IP и чисел' },
+        { type: 'Добавлено', text: 'Логи: выборочное скачивание строк или скачивание всех сразу, в файле дата, период, ник, ошибки и время поиска' },
+        { type: 'Добавлено', text: 'Профиль: смена своей роли до Куратора, кнопка «Удалить аккаунт» с предупреждениями' },
+        { type: 'Добавлено', text: 'Иконки запуска: Макима, Айзен, Канеки и Ребекка с новыми картинками и оформлением' },
+        { type: 'Изменено', text: 'Огонёк после 200 дней не сбрасывается' },
+        { type: 'Изменено', text: 'Скрытие IP: кликать по адресам нельзя; скрытие денег срабатывает для AZ Coins и других валют' },
+        { type: 'Изменено', text: 'Комета на главной странице падает вертикально и реже; вкладка «Пользователи» убрана' },
+        { type: 'Изменено', text: 'Белый фон логов убран; версия перенесена к BETA' },
+      ],
+    },
+    {
+      version: '5.1.0', date: '14.10.2026', items: [
+        { type: 'Добавлено', text: 'Фон логов: Стоковый, Кастомный, Чёрный, Белый' },
+        { type: 'Добавлено', text: 'Скрытие даты в логах, режимы анимации: снегопад, кровь, бантики, размер анимации' },
+        { type: 'Изменено', text: 'КД по умолчанию 3 сек, можно задать свой. Запросы: 100, 200, 500, 1000' },
+      ],
+    },
+    {
       version: '5.0.0', date: '13.10.2026', global: true, items: [
-        { type: 'Добавлено', text: 'Все окна скрипта можно перемещать (меню, результаты проверок, всплывающие окна)' },
-        { type: 'Добавлено', text: 'Новый профиль: иконка профиля слева внизу, аватар-буква, баннер под цвет меню, огонёк с подсказкой, блок «Связь»' },
-        { type: 'Добавлено', text: 'Должность «Разработчик» с переливающимся красным градиентом и вкладка «Разработчик» с тестовым режимом ролей' },
-        { type: 'Добавлено', text: 'Фильтр «Онлайн»: онлайн и репорты игрока или нескольких администраторов за период' },
-        { type: 'Добавлено', text: 'Техничка: две кнопки — настройки логов и настройки скрипта, в каждом своя кнопка «Сбросить настройки»' },
-        { type: 'Добавлено', text: 'Фон логов ставится сразу: достаточно вставить ссылку или картинку' },
-        { type: 'Добавлено', text: 'Меню скрипта можно растягивать, размер сохраняется' },
-        { type: 'Добавлено', text: 'Стоковый вид меню, выбор цвета анимации, анимации стали чёрно-белыми' },
-        { type: 'Добавлено', text: 'Иконки запуска: Макима, Айзен Соскэ, Кен Канеки, Ребекка с оформлением под персонажа, фразами и размером' },
-        { type: 'Добавлено', text: 'Переключатель «Скачивание файлов проверок» для всех проверок' },
-        { type: 'Изменено', text: 'Запросы: 150, 300, 500, 1000; КД: 5, 10, 15, 20' },
-        { type: 'Изменено', text: 'Скрытие IP размывает только серую и красную ячейки' },
-        { type: 'Изменено', text: 'Фильтры по центру окна, оставлены только названия и иконки, убраны лишние надписи' },
-        { type: 'Изменено', text: 'Продолжение из файла: после выбора файла поиск стартует сам через 5 секунд' },
-        { type: 'Изменено', text: 'Поле кода аутентификатора берёт цвет фона логов' },
-        { type: 'Изменено', text: 'Закрытие вкладок и меню стало плавнее; приветствие и предупреждение показываются один раз при запуске браузера' },
+        { type: 'Добавлено', text: 'Все окна скрипта можно перемещать' },
+        { type: 'Добавлено', text: 'Новый профиль: баннер, аватар, огонёк, блок «Связь»' },
+        { type: 'Добавлено', text: 'Должность «Разработчик» и вкладка «Для Разработчика» с тестовым режимом' },
       ],
     },
     {
       version: '4.13.0', date: '12.10.2026', items: [
         { type: 'Добавлено', text: 'Роль «Разработчик» для аккаунта Without_Custom' },
         { type: 'Добавлено', text: 'Должности: Главный Администратор, Заместитель ГА, Куратор, Администратор' },
-        { type: 'Изменено', text: 'Все уже зарегистрированные аккаунты получили должность «Администратор»; её можно поменять в настройках профиля' },
       ],
     },
     {
       version: '4.12.0', date: '12.10.2026', items: [
-        { type: 'Изменено', text: 'Настройки переименованы в «Техничка», внутри два раздела: Логи и Скрипт' },
-        { type: 'Добавлено', text: 'Вкладка «Логи»: все проверки с датой, можно открыть, скачать TXT или продолжить' },
-        { type: 'Добавлено', text: 'Анимация меню: звёздочки, бабочки, солнце, молнии, снежинки, летучие мыши' },
-        { type: 'Исправлено', text: 'На белом фоне логов контуры вкладок и названия ячеек чёрные' },
+        { type: 'Добавлено', text: 'Вкладка «Логи»: все проверки с датой, можно открыть или продолжить' },
       ],
     },
-    { version: '4.11.0', date: '12.10.2026', items: [
-      { type: 'Исправлено', text: 'Ошибка HTTP 429: запросы идут с паузой' },
-      { type: 'Добавлено', text: 'Новый профиль: баннер, аватар, сервер, VK и Telegram, должности' },
-      { type: 'Добавлено', text: 'Кнопка «Стоп», продолжение поиска и файл при сбое' },
-    ] },
   ];
 
   const KEY = {
-    btnPos: 'cl_btn_pos', panelPos: 'cl_panel_pos', panelSize: 'cl_panel_size', bgUrl: 'cl_bg_url', bgOn: 'cl_bg_on',
-    banner: 'cl_banner', blur: 'cl_blur', theme: 'cl_theme', ipHide: 'cl_ip_hide',
+    btnPos: 'cl_btn_pos', panelPos: 'cl_panel_pos', panelSize: 'cl_panel_size', bgUrl: 'cl_bg_url',
+    banner: 'cl_banner', blur: 'cl_blur', theme: 'cl_theme', ipHide: 'cl_ip_hide', dateHide: 'cl_date_hide',
     moneyHide: 'cl_money_hide', limit: 'cl_limit', limitOn: 'cl_limit_on', accounts: 'cl_accounts',
     session: 'cl_session', streak: 'cl_streak', updRemote: 'cl_upd_remote', critical: 'cl_critical',
     outdated: 'cl_outdated', autoUpd: 'cl_auto_upd', autoTried: 'cl_auto_tried', lastSeen: 'cl_last_seen',
-    perReq: 'cl_per_req', cd: 'cl_cd', saveLogs: 'cl_save_logs', saveFile: 'cl_save_file', allowDl: 'cl_allow_dl',
-    fx: 'cl_fx', jobs: 'cl_jobs', mech: 'cl_mech', posVer: 'cl_pos_ver', ownerInit: 'cl_owner_init',
+    perReq: 'cl_per_req', cd: 'cl_cd', cdVer: 'cl_cd_ver', saveLogs: 'cl_save_logs', saveFile: 'cl_save_file', allowDl: 'cl_allow_dl',
+    fx: 'cl_fx', jobs: 'cl_jobs', mech: 'cl_mech', posVer: 'cl_pos_ver', ownerInit: 'cl_owner_init', roleFix: 'cl_role_fix',
     char: 'cl_char', charTheme: 'cl_char_theme', btnScale: 'cl_btn_scale', devRole: 'cl_dev_role',
   };
   const DEF = {
-    btnPos: null, panelPos: null, panelSize: null, bgUrl: '', bgOn: false, banner: 'black', blur: 0, theme: {},
-    ipHide: true, moneyHide: false, limit: 100, limitOn: false, accounts: {}, session: null,
+    btnPos: null, panelPos: null, panelSize: null, bgUrl: '', banner: 'black', blur: 0, theme: {},
+    ipHide: true, dateHide: false, moneyHide: false, limit: 100, limitOn: false, accounts: {}, session: null,
     streak: { last: '', days: 0 }, updRemote: '', critical: false, outdated: null,
-    autoUpd: true, autoTried: '', lastSeen: '', perReq: 150, cd: 5, saveLogs: true, saveFile: false, allowDl: true,
-    fx: { type: 'star', count: 10, speed: 10, color: 'auto' }, jobs: [],
+    autoUpd: true, autoTried: '', lastSeen: '', perReq: 100, cd: CD_DEF, cdVer: 0,
+    saveLogs: true, saveFile: false, allowDl: true,
+    fx: { type: 'snow', count: 10, speed: 10, color: 'auto', size: 100 }, jobs: [],
     mech: { big: 1000000, cheap: 100000, res: 15, barrel: 3 },
-    posVer: 0, ownerInit: 0, char: 'makima', charTheme: true, btnScale: 1, devRole: '',
+    posVer: 0, ownerInit: 0, roleFix: 0, char: 'makima', charTheme: true, btnScale: 1, devRole: '',
   };
   const TRANSFER_RE = /(передал|перевел|отправил|перевод)/i;
   const SALE_RE = /(продал|продажа|продажу)/i;
@@ -218,6 +212,9 @@
   const BARREL_RE = /бочк/i;
   const EARN_RE = /(получил|заработал|выручк|продал|доход|выигрыш)/i;
   const SPEND_RE = /(потратил|оплатил|заплатил|штраф|купил|отдал|передал|перевел)/i;
+  // Подсветка: 1 IP, 2 деньги, 3 AZ Coins, 4 машины, 5-6 ник, 7 любое число
+  const HL_RE = /(\b\d{1,3}(?:\.\d{1,3}){3}\b)|(\d(?:[\d ,]*\d)?\s*(?:руб\.?|денег))|(\bAZ[\s-]?Coins?\b|\bAZ\b)|(т\/с|транспорт\S*|автомоб\S*|машин\S*|\bавто\b|ВАЗ|IVECO|Tesla|Ferrari|Porsche|Mitsubishi|BMW|Mercedes|Lada|Kia|Toyota|Nissan|Mazda|Hyundai|Audi)|((?:Игрок|Игроку|Администратор)\s+)([^\s,.:;()\[\]<>]+)|(\d(?:[\d ,]*\d)?)/gi;
+  const MONEY_TXT_RE = /\d(?:[\d ,]*\d)?\s*(?:руб\.?|денег|AZ[\s-]?Coins?|AZ\b|\$)/gi;
   /* ============================================ */
 
   /* ---------- Утилиты ---------- */
@@ -243,7 +240,7 @@
   const normDT = s => { const d = parseDT(s); return d ? fmtSite(d) : ''; };
   const addSec = (s, sec) => { const d = parseDT(s); return d ? fmtSite(new Date(d.getTime() + sec * 1000)) : s; };
   const fileDate = ms => { const d = new Date(ms); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}-${pad(d.getMinutes())}`; };
-  const dateTimeRu = ms => { const d = new Date(ms); return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+  const dateTimeRu = ms => { const d = new Date(ms); return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
   const serverName = n => (SERVERS.find(s => s[0] === n) || [])[1] || '';
   const cmpVer = (a, b) => {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -253,11 +250,11 @@
     }
     return 0;
   };
+  const whoOf = a => (a.match(/(?:Игрок|Игроку)\s+(\S+)/) || [])[1] || '?';
   const parseMoney = t => {
     const m = t.match(/(\d[\d ,]*)\s*(?:руб|денег)/i);
     return m ? Number(m[1].replace(/[ ,]/g, '')) || 0 : 0;
   };
-  const whoOf = a => (a.match(/(?:Игрок|Игроку)\s+(\S+)/) || [])[1] || '?';
   const fmtPlain = v => `${Math.round(v).toLocaleString('ru-RU')} руб.`;
   const fmtDur = sec => {
     sec = Math.max(0, Math.round(sec));
@@ -293,14 +290,14 @@
     const end = Date.now() + ms;
     const t = setInterval(() => { if (stopFlag || Date.now() >= end) { clearInterval(t); res(); } }, 200);
   });
-  const perReq = () => (PER_OPTIONS.includes(+cfg('perReq')) ? +cfg('perReq') : 150);
-  const cdSec = () => (CD_OPTIONS.includes(+cfg('cd')) ? +cfg('cd') : 5);
+  const perReq = () => (PER_OPTIONS.includes(+cfg('perReq')) ? +cfg('perReq') : 100);
+  const cdSec = () => { const v = Number(cfg('cd')); return v >= CD_MIN && v <= CD_MAX ? v : CD_DEF; };
 
   /* Окно браузера открыто заново — session-cookie живёт, пока браузер не закрыт */
   const browserFresh = () => !/(?:^|;\s*)cl_browser=1/.test(document.cookie);
   const markBrowser = () => { document.cookie = 'cl_browser=1; path=/; SameSite=Lax'; };
 
-  /* Перетаскивание любого окна за «ручку» (через свойство translate) */
+  /* Перетаскивание окна за «ручку» (через свойство translate) */
   function makeDrag(el, handle) {
     let on = false, sx = 0, sy = 0, tx = 0, ty = 0;
     const apply = () => {
@@ -322,14 +319,29 @@
     return () => { tx = 0; ty = 0; el.style.translate = ''; };
   }
 
-  /* Подсветка ников и сумм */
+  /* Подсветка строк: IP красным (тихо), AZ Coins жёлтым, деньги зелёным, машины серым, любое число розовым, ники жирным */
   function hl(text) {
-    let s = esc(text);
-    s = s.replace(/((?:Игрок|Игроку|Администратор)\s+)([^\s,.:;()\[\]<>]+)/g, (m, a, n) => `${a}<b class="nk">${n}</b>`);
-    s = s.replace(/(\d[\d ,]*)(\s*(?:руб\.?|денег|AZ))/g, (m, a, b) => `<b class="mn">${a}${b}</b>`);
-    return s;
+    const s = String(text);
+    let out = '', last = 0, m;
+    HL_RE.lastIndex = 0;
+    while ((m = HL_RE.exec(s))) {
+      const full = m[0];
+      out += esc(s.slice(last, m.index));
+      if (m[1]) out += `<b class="ip">${esc(full)}</b>`;
+      else if (m[2]) out += `<b class="mn">${esc(full)}</b>`;
+      else if (m[3]) out += `<b class="az">${esc(full)}</b>`;
+      else if (m[4]) out += `<b class="car">${esc(full)}</b>`;
+      else if (m[5]) out += `${esc(m[5])}<b class="nk">${esc(m[6])}</b>`;
+      else out += `<b class="cnt">${esc(full)}</b>`;
+      last = m.index + full.length;
+    }
+    return out + esc(s.slice(last));
   }
-  const rowHtml = (date, html) => `<div class="r"><span class="d">${esc(date)}</span><span class="t">${html}</span></div>`;
+  // Скрытие денег: заменяет суммы, AZ Coins и валюту на «скрыто»
+  function maskText(t) { return cfg('moneyHide') ? String(t).replace(MONEY_TXT_RE, 'скрыто') : t; }
+  const rowHtml = (date, html, i) => i === undefined
+    ? `<div class="r"><span class="d">${esc(date)}</span><span class="t">${html}</span></div>`
+    : `<div class="r sel-able" data-i="${i}"><span class="d">${esc(date)}</span><span class="t">${html}</span></div>`;
   const secHtml = (title, n) => `<div class="sec">${esc(title)}<i>${n}</i></div>`;
   const infoHtml = text => `<div class="info">${esc(text)}</div>`;
   const playerHtml = (who, text) => `<div class="pl"><b class="nk">${esc(who)}</b><span>${esc(text)}</span></div>`;
@@ -345,28 +357,26 @@
     const st = cfg('streak') || {};
     if (st.last === today) return;
     let days = st.days || 0;
-    if (!st.last) {
-      days = 1;
-    } else {
+    if (!st.last) days = 1;
+    else {
       const gap = dayDiff(st.last, today);
-      // С 200 дней огонёк после неактива не сбрасывается
-      const keep = days >= STREAK_PROTECT ? true : gap <= STREAK_RESET_DAYS;
-      days = keep ? days + 1 : 1;
+      // Не заходил больше 7 дней — огонёк сбрасывается, но только если до 200 дней не дошёл
+      days = (gap <= STREAK_RESET_DAYS || days >= STREAK_PROTECT) ? days + 1 : 1;
     }
     setCfg('streak', { last: today, days });
   }
   let flameUid = 0;
   function flameSvg(tier, size) {
     const id = 'f' + (++flameUid);
-    const c = tier.c, dim = tier.id === 'dim';
-    const top = tier.id === 'grad' ? '#fde047' : mixHex(c, '#ffffff', 0.35);
-    const bot = tier.id === 'grad' ? '#dc2626' : mixHex(c, '#000000', 0.35);
-    const midTop = mixHex(c, '#ffffff', 0.65), midBot = mixHex(c, '#ffffff', 0.15);
-    const stroke = tier.id === 'grad' ? ' stroke="#000" stroke-width=".7"' : '';
-    return `<svg class="flame" width="${Math.round(size * 0.75)}" height="${size}" viewBox="0 0 24 32" style="${dim ? 'opacity:.55' : `filter:drop-shadow(0 0 5px ${hexRgba(c, 0.55)})`}">
+    const c = tier.c, dim = tier.id === 'dim', grad = tier.id === 'grad';
+    const st = arr => arr.map((col, i) => `<stop offset="${(i / (arr.length - 1)).toFixed(2)}" stop-color="${col}"/>`).join('');
+    const outer = grad ? ['#fde047', '#f97316', '#ef4444', '#ec4899', '#8b5cf6'] : [mixHex(c, '#ffffff', 0.35), mixHex(c, '#000000', 0.35)];
+    const mid = grad ? ['#fef08a', '#fb7185', '#f0abfc', '#67e8f9'] : [mixHex(c, '#ffffff', 0.65), mixHex(c, '#ffffff', 0.15)];
+    const stroke = grad ? ' stroke="#000" stroke-width=".7"' : '';
+    return `<svg class="flame${grad ? ' fl-grad' : ''}" width="${Math.round(size * 0.75)}" height="${size}" viewBox="0 0 24 32" style="${dim ? 'opacity:.55' : `filter:drop-shadow(0 0 6px ${hexRgba(c, 0.6)})`}">
       <defs>
-        <linearGradient id="${id}o" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${top}"/><stop offset="1" stop-color="${bot}"/></linearGradient>
-        <linearGradient id="${id}m" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${midTop}"/><stop offset="1" stop-color="${midBot}"/></linearGradient>
+        <linearGradient id="${id}o" x1="0" y1="0" x2="0" y2="1">${st(outer)}</linearGradient>
+        <linearGradient id="${id}m" x1="0" y1="0" x2="0" y2="1">${st(mid)}</linearGradient>
         <radialGradient id="${id}c" cx=".5" cy=".7" r=".6"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#fff3b0"/></radialGradient>
       </defs>
       <path class="fl-o" fill="url(#${id}o)"${stroke} d="M12 1C13 7 20 10 20 19A8 8 0 0 1 4 19C4 14 7 11.5 8.5 8.5C9.5 10.5 10.5 11 11.2 11C11.5 7.5 11 4 12 1Z"/>
@@ -397,6 +407,7 @@
     accs[key] = { ...accs[key], ...patch };
     setCfg('accounts', accs);
   };
+  const touchSeen = () => { const a = getAcc(); if (a) saveAcc(a.key, { seen: Date.now() }); };
   const newSalt = () =>
     [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2, '0')).join('');
   async function hashPass(pass, salt) {
@@ -426,10 +437,19 @@
       setCfg('ownerInit', 1);
       changed = true;
     }
+    if (cfg('roleFix') !== 1) {
+      if (accs['young_nakamura']) {
+        accs['young_nakamura'] = { ...accs['young_nakamura'], position: 'Куратор' };
+        changed = true;
+      }
+      setCfg('roleFix', 1);
+    }
     if (changed) setCfg('accounts', accs);
-    // старые значения «Запросов» и «КД» (90, 100 и т.д.) приводим к новым вариантам
-    if (!PER_OPTIONS.includes(+cfg('perReq'))) setCfg('perReq', 150);
-    if (!CD_OPTIONS.includes(+cfg('cd'))) setCfg('cd', 5);
+    if (!PER_OPTIONS.includes(+cfg('perReq'))) setCfg('perReq', 100);
+    if (cfg('cdVer') !== 1) { setCfg('cd', CD_DEF); setCfg('cdVer', 1); }
+    // Старый белый фон логов убран: возвращаем стоковый
+    if (cfg('banner') === 'white') setCfg('banner', '');
+    if (cfg('bgOn')) { if (cfg('bgUrl')) setCfg('banner', 'custom'); setCfg('bgOn', false); }
   }
 
   /* ---------- Обновления ---------- */
@@ -449,6 +469,7 @@
   const siteStyle = document.createElement('style');
   siteStyle.id = 'cl-site';
   document.head.appendChild(siteStyle);
+  let curIdx = null;
 
   function colIdx() {
     const row = document.querySelector('table tr');
@@ -461,6 +482,7 @@
     return {
       ip: find(t => /ip/.test(t) && /адрес/.test(t)),
       money: find(t => t.startsWith('данные')),
+      date: find(t => /дата|время/.test(t)) || 1,
     };
   }
 
@@ -491,10 +513,6 @@
         .app-content,.app-content-body,.app-nav,.dropdown-menu,.modal-content,.bg-white,.bg-dark,.bg-light,.shadow-sm) {
         background-color: transparent !important; background-image: none !important; box-shadow: none !important; }
       body.cl-bg-on :is(${TXT_SEL}) { color: #fff !important; }
-      body.cl-bg-on.cl-tone-light :is(${TXT_SEL}) { color: #111 !important; }
-      body.cl-bg-on.cl-tone-light :is(.navbar,.app-nav-menu__item-link,.nav-link,.btn,.card,.page-link,.dropdown-menu,
-        .app-sidebar,.app-nav,table,td,th,tr,input,select,textarea) { border-color: #000 !important; }
-      body.cl-bg-on.cl-tone-light .app-nav-menu__item-link { border: 1px solid #000 !important; }
 
       ${fieldSelectors} {
         background: transparent !important; background-color: transparent !important; background-image: none !important;
@@ -502,8 +520,6 @@
         color: #fff !important; -webkit-text-fill-color: #fff !important;
         border: 1px solid rgba(255,255,255,.35) !important; box-shadow: none !important; border-radius: 4px !important;
       }
-      body.cl-bg-on.cl-tone-light ${fieldSelectors.split(',').map(s => s.trim()).join(', body.cl-bg-on.cl-tone-light ')} {
-        color: #111 !important; -webkit-text-fill-color: #111 !important; border-color: #000 !important; }
       body.cl-bg-on .select2-container, body.cl-bg-on .select2-selection__rendered,
       body.cl-bg-on .select2-selection__arrow, body.cl-bg-on .select2-search__field { border: none !important; box-shadow: none !important; }
       body.cl-bg-on .select2-selection__placeholder { color: rgba(255,255,255,.65) !important; }
@@ -513,22 +529,26 @@
       body.cl-bg-on .select2-results__option--highlighted { background: rgba(255,255,255,.15) !important; }
       body.cl-bg-on form.filter ::placeholder { color: rgba(255,255,255,.6) !important; }
       body.cl-bg-on form.filter option, body.cl-bg-on select option { background: #1b1530 !important; color: #fff !important; }
-      body.cl-bg-on.cl-tone-light form.filter option, body.cl-bg-on.cl-tone-light select option { background: #fff !important; color: #111 !important; }
 
       body.cl-bg-on .pagination .page-link, body.cl-bg-on .pagination .page-item > span, body.cl-bg-on .page-link {
         background: transparent !important; background-color: transparent !important;
         color: #fff !important; border: 1px solid rgba(255,255,255,.45) !important; box-shadow: none !important; }
-      body.cl-bg-on.cl-tone-light .pagination .page-link, body.cl-bg-on.cl-tone-light .page-link { color: #111 !important; }
       body.cl-bg-on .pagination .page-item.active .page-link, body.cl-bg-on .pagination .page-item.active > span {
         background-color: #c0392b !important; border-color: #c0392b !important; color: #fff !important; }
 
-      /* Скрытие IP: размываются только серая и красная ячейки */
-      body.cl-ip-hide [data-cl-ip] { filter: blur(6px) !important; pointer-events: none !important; user-select: none !important; }
+      /* Скрытие IP: размываются серые и красные ячейки, а вся колонка IP не нажимается */
+      body.cl-ip-hide [data-cl-ip] { filter: blur(6px) !important; }
+      body.cl-ip-hide [data-cl-ip], body.cl-ip-hide [data-cl-ip] * {
+        pointer-events: none !important; user-select: none !important; cursor: default !important; }
 
-      ${codeRule('cl-code-black', '#000', '#fff')}
-      ${codeRule('cl-code-white', '#fff', '#000')}`;
+      ${codeRule('cl-code-black', '#000', '#fff')}`;
     if (idx && idx.money) css += `
       body.cl-money-hide table tr > :nth-child(${idx.money}) { display: none !important; }`;
+    if (idx && idx.date) css += `
+      body.cl-date-hide table tr > :nth-child(${idx.date}) { display: none !important; }`;
+    if (idx && idx.ip) css += `
+      body.cl-ip-hide table tr > :nth-child(${idx.ip}), body.cl-ip-hide table tr > :nth-child(${idx.ip}) * {
+        pointer-events: none !important; user-select: none !important; cursor: default !important; }`;
     return css;
   }
 
@@ -549,31 +569,30 @@
     cells.forEach(c => [c, ...c.querySelectorAll('*')].forEach(el => {
       if (isGrayRed(el)) { el.setAttribute('data-cl-ip', '1'); n++; }
     }));
-    if (!n) cells.forEach(c => c.setAttribute('data-cl-ip', '1')); // запасной вариант: если цветных ячеек не нашли
+    if (!n) cells.forEach(c => c.setAttribute('data-cl-ip', '1'));
   }
 
   let lastIdx = null;
-  // Режим фона: 'img', 'black', 'white' или '' (стоковый, без изменений)
+  // Режим фона логов: 'img' (кастомный), 'black' или '' (стоковый)
   function bgMode() {
     if (!working()) return '';
-    if (cfg('bgOn') && cfg('bgUrl')) return 'img';
     const b = cfg('banner');
-    return b === 'black' || b === 'white' ? b : '';
+    if (b === 'custom') return cfg('bgUrl') ? 'img' : '';
+    return b === 'black' ? 'black' : '';
   }
   function syncBody() {
     const m = bgMode();
     document.body.classList.toggle('cl-bg-on', !!m);
-    document.body.classList.toggle('cl-tone-light', m === 'white');
     document.body.classList.toggle('cl-ip-hide', working() && cfg('ipHide'));
     document.body.classList.toggle('cl-money-hide', working() && cfg('moneyHide'));
-    const white = cfg('banner') === 'white' && !(cfg('bgOn') && cfg('bgUrl'));
-    document.body.classList.toggle('cl-code-white', white);
-    document.body.classList.toggle('cl-code-black', !white);
+    document.body.classList.toggle('cl-date-hide', working() && cfg('dateHide'));
+    document.body.classList.add('cl-code-black');
   }
   function syncSite(force) {
     syncBody();
     const idx = colIdx();
-    const key = idx ? `${idx.ip}|${idx.money}` : '';
+    curIdx = idx;
+    const key = idx ? `${idx.ip}|${idx.money}|${idx.date}` : '';
     if (force || key !== lastIdx) {
       lastIdx = key;
       siteStyle.textContent = buildSiteCss(idx);
@@ -593,11 +612,21 @@
     const m = bgMode();
     const layer = bgRoot.getElementById('layer');
     layer.style.backgroundImage = m === 'img' ? `url("${cfg('bgUrl')}")` : 'none';
-    layer.style.backgroundColor = m === 'black' ? '#000000' : m === 'white' ? '#ffffff' : 'transparent';
+    layer.style.backgroundColor = m === 'black' ? '#000000' : 'transparent';
     layer.style.filter = m === 'img' && cfg('blur') ? `blur(${cfg('blur')}px)` : 'none';
     bgHost.style.display = m ? 'block' : 'none';
     syncSite(true);
   }
+
+  // Клик по IP-адресам при скрытии не работает
+  document.addEventListener('click', e => {
+    if (!working() || !cfg('ipHide') || !curIdx || !curIdx.ip) return;
+    const td = e.target.closest && e.target.closest('td,th');
+    if (!td || !td.parentElement) return;
+    if ([...td.parentElement.children].indexOf(td) === curIdx.ip - 1) {
+      e.preventDefault(); e.stopPropagation();
+    }
+  }, true);
 
   /* =========================================================
      ИНТЕРФЕЙС СКРИПТА: Shadow DOM
@@ -612,31 +641,32 @@
 
   let panel, btn, bubble, sayTimer = null, pending = null, sleeping = false;
   let busy = false, chain = false, stopFlag = false, curKind = 'probiv', pMode = 'nick', typeOpts = [];
-  let pendingUpload = null, shownJob = null, fileLoading = false, tabToken = 0, resetWinPos = () => {};
+  let shownJob = null, selSet = new Set(), fileLoading = false, tabToken = 0;
   const isBusy = () => busy || chain;
 
   const CSS = `
   :host{--cl-accent:#000;--cl-accent-fill:#000;--cl-panel:#fff;--cl-panel-fill:#fff;
-    --cl-hover:#000;--cl-hover-soft:rgba(0,0,0,.13);--cl-text:#14121c;--cl-muted:#5b5670;--cl-head:#0b0a12;
+    --cl-hover:#000;--cl-hover-soft:rgba(0,0,0,.13);--cl-text:#14121c;--cl-muted:#5b5670;--cl-head:#0b0a12;--cl-title:#000;
     --cl-field-bg:rgba(0,0,0,.05);--cl-field-text:#14121c;--cl-on-accent:#fff;
     --cl-ok:#22c55e;--cl-off:#ef4444;--cl-warn:#f59e0b;--cl-ease:cubic-bezier(.16,1,.3,1);--cl-fxc:#000;
     font-family:'Nunito','Segoe UI',system-ui,sans-serif;font-size:15px;line-height:1.55;letter-spacing:.2px;-webkit-font-smoothing:antialiased}
   button,input,select,textarea{font:inherit;color:inherit}
   *{box-sizing:border-box}
   @keyframes clPane{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
-  @keyframes clFade{from{opacity:0}to{opacity:1}}
-  @keyframes clIn{from{opacity:0;transform:translateY(10px) scale(.97)}to{opacity:1;transform:none}}
   @keyframes clPulseOk{0%,100%{box-shadow:0 0 0 0 rgba(34,197,94,.55)}50%{box-shadow:0 0 0 7px rgba(34,197,94,0)}}
   @keyframes clPulseOff{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.55)}50%{box-shadow:0 0 0 7px rgba(239,68,68,0)}}
   @keyframes clPulseWarn{0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,.6)}50%{box-shadow:0 0 0 7px rgba(245,158,11,0)}}
   @keyframes clBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
   @keyframes clZ{0%{opacity:0;transform:translate(0,0) scale(.6)}30%{opacity:1}100%{opacity:0;transform:translate(14px,-24px) scale(1)}}
-  @keyframes clFl1{0%,100%{transform:scale(1,1) skewX(0)}30%{transform:scale(.96,1.06) skewX(-2deg)}60%{transform:scale(1.03,.97) skewX(2deg)}}
-  @keyframes clFl2{0%,100%{transform:scale(1,1)}40%{transform:scale(.92,1.1)}70%{transform:scale(1.05,.95)}}
-  @keyframes clFl3{0%,100%{transform:scale(1,1);opacity:1}50%{transform:scale(.85,1.15);opacity:.85}}
+  @keyframes clFl1{0%,100%{transform:scale(1,1) skewX(0)}30%{transform:scale(.94,1.08) skewX(-3deg)}60%{transform:scale(1.04,.96) skewX(3deg)}}
+  @keyframes clFl2{0%,100%{transform:scale(1,1)}40%{transform:scale(.9,1.12)}70%{transform:scale(1.06,.94)}}
+  @keyframes clFl3{0%,100%{transform:scale(1,1);opacity:1}50%{transform:scale(.8,1.2);opacity:.8}}
+  @keyframes clFlick{0%,100%{transform:translateY(0)}50%{transform:translateY(-2px)}}
+  @keyframes clHue{from{filter:hue-rotate(0deg)}to{filter:hue-rotate(360deg)}}
   @keyframes clBar{from{width:0}to{width:100%}}
   @keyframes clFallFx{from{transform:translateY(0) rotate(0deg)}to{transform:translateY(780px) rotate(200deg)}}
-  @keyframes clDevFlow{0%{background-position:0% 50%}100%{background-position:300% 50%}}
+  @keyframes clDevFlow{0%{background-position:0% 50%}100%{background-position:100% 50%}}
+  @keyframes clComet{0%{transform:translate3d(0,-60px,0);opacity:0}3%{opacity:1}22%{opacity:0;transform:translate3d(0,320px,0)}100%{opacity:0;transform:translate3d(0,320px,0)}}
 
   #cl-btn{position:fixed;top:120px;right:24px;cursor:pointer;user-select:none;touch-action:none;transition:transform .35s var(--cl-ease)}
   #cl-btn:hover{transform:translateY(-2px)}
@@ -653,7 +683,6 @@
   .cl-zzz span:nth-child(3){animation-delay:1.6s;font-size:9px}
   #cl-btn.sleep .cl-zzz{display:block}
 
-  /* Фраза: широкий прямоугольник, место выбирается скриптом (свободная сторона) */
   .cl-bubble{position:fixed;pointer-events:none;display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:12px;
     background:#0a0a0d;color:#ebe8f5;border:1px solid rgba(255,255,255,.35);
     box-shadow:0 8px 24px rgba(0,0,0,.6);font-size:13px;font-weight:700;line-height:1.5;opacity:0;visibility:hidden;
@@ -665,11 +694,11 @@
   .cl-dot.warn{background:var(--cl-warn);animation:clPulseWarn 2s infinite}
   .cl-dot.static{animation:none!important}
 
-  #cl-warn,#cl-upopup{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.6);backdrop-filter:blur(3px);
+  #cl-warn,#cl-upopup,#cl-del{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.6);backdrop-filter:blur(3px);
     opacity:0;visibility:hidden;transition:opacity .45s var(--cl-ease),visibility 0s .45s}
-  #cl-warn{z-index:2147483647}
+  #cl-warn,#cl-del{z-index:2147483647}
   #cl-upopup{z-index:2147483600;background:transparent;backdrop-filter:none;pointer-events:none}
-  #cl-warn.open,#cl-upopup.open{opacity:1;visibility:visible;transition:opacity .45s var(--cl-ease),visibility 0s}
+  #cl-warn.open,#cl-upopup.open,#cl-del.open{opacity:1;visibility:visible;transition:opacity .45s var(--cl-ease),visibility 0s}
   #cl-upopup .cl-upbox{pointer-events:auto}
   .cl-box{width:min(460px,92vw);padding:26px;border-radius:18px;background:var(--cl-panel);color:var(--cl-text);
     border:1px solid color-mix(in srgb,var(--cl-accent) 50%,transparent);box-shadow:0 24px 70px rgba(0,0,0,.8)}
@@ -684,8 +713,11 @@
   .cl-upglobal{display:inline-block;margin:0 0 10px;padding:3px 9px;border-radius:7px;font-size:12px;font-weight:800;background:var(--cl-accent-fill);color:var(--cl-on-accent)}
   .cl-upbody{max-height:240px;overflow:auto;margin-bottom:10px}
   .cl-upend{white-space:pre-line;color:var(--cl-muted);font-size:13px;margin:10px 0 12px;line-height:1.6}
-  .cl-upbar{height:4px;border-radius:4px;background:color-mix(in srgb,var(--cl-text) 10%,transparent);overflow:hidden;margin-bottom:12px}
+  .cl-upbar{height:4px;border-radius:4px;background:color-mix(in srgb,var(--cl-text) 10%,transparent);overflow:hidden;margin:0 0 12px}
   .cl-upbar i{display:block;height:100%;background:var(--cl-accent-fill);animation:clBar 8s linear forwards}
+  .cl-del-steps{font-size:13px;color:var(--cl-muted);margin-bottom:6px}
+  .cl-del-row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:8px}
+  .cl-del-row .cl-btnp{width:auto;margin-top:0;min-width:140px}
 
   #cl-panel{position:fixed;width:min(1060px,96vw);height:min(600px,86vh);min-width:640px;min-height:420px;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);
     display:flex;flex-direction:column;overflow:hidden;
@@ -701,26 +733,27 @@
   #cl-panel.logged .cl-pane[data-pane=auth]{display:none!important}
   #cl-panel.blocked .cl-tab:not([data-tab=update]),#cl-panel.blocked .cl-profbtn{display:none!important}
   #cl-panel.blocked .cl-pane:not([data-pane=update]){display:none!important}
-  #cl-fx{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:0}
+  #cl-fx,#cl-wfx{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:0}
   .fxp{position:absolute;top:-50px;opacity:.55;pointer-events:none;animation-name:clFallFx;animation-timing-function:linear;animation-iteration-count:infinite}
   .fxp span{display:block;color:transparent;text-shadow:0 0 0 var(--cl-fxc)}
   .fxp i{display:block;background:var(--cl-fxc);-webkit-mask-size:contain;mask-size:contain;-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;-webkit-mask-position:center;mask-position:center}
-  .cl-head,.cl-main{position:relative;z-index:1}
+  .cl-head,.cl-main,#cl-win > .cl-wbody{position:relative;z-index:1}
 
   .cl-head{display:flex;align-items:center;justify-content:space-between;padding:13px 22px;cursor:move;user-select:none;
-    background:color-mix(in srgb,var(--cl-panel) 90%,var(--cl-text) 6%);border-bottom:1px solid color-mix(in srgb,var(--cl-accent) 30%,transparent)}
-  .cl-title{display:flex;align-items:center;gap:10px}
-  .cl-title b{font-size:16px;font-weight:800;color:var(--cl-head)}
+    background:transparent;border-bottom:1px solid color-mix(in srgb,var(--cl-accent) 30%,transparent)}
+  .cl-title{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .cl-title b{font-size:16px;font-weight:800;color:var(--cl-title)}
   .cl-title > span{font-size:13px;color:var(--cl-muted)}
   .cl-beta{font:800 10px/1 'Nunito',sans-serif;letter-spacing:1px;padding:5px 8px;border-radius:6px;font-style:normal;background:var(--cl-accent-fill);color:var(--cl-on-accent)}
+  .cl-homever{font:700 12px/1 Consolas,monospace;color:var(--cl-muted);padding:5px 8px;border-radius:7px;border:1px solid color-mix(in srgb,var(--cl-accent) 35%,transparent)}
   .cl-test{display:none;align-items:center;gap:8px;margin-left:8px;padding:4px 6px 4px 10px;border-radius:8px;font-size:12px;font-weight:800;background:var(--cl-warn);color:#111}
   .cl-test.on{display:inline-flex}
   .cl-test button{border:0;border-radius:6px;padding:2px 8px;cursor:pointer;font-weight:800;background:#111;color:#fff}
   .cl-x{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--cl-muted);transition:background .3s,color .3s,transform .4s var(--cl-ease)}
   .cl-x:hover{background:var(--cl-hover-soft);color:var(--cl-text);transform:rotate(90deg)}
   .cl-main{flex:1;display:flex;min-height:0}
-  .cl-nav{width:210px;padding:18px 14px;display:flex;flex-direction:column;gap:9px;background:color-mix(in srgb,var(--cl-panel) 94%,var(--cl-text) 4%);
-    border-right:1px solid color-mix(in srgb,var(--cl-accent) 18%,transparent);overflow:auto}
+  .cl-nav{width:210px;padding:18px 14px;display:flex;flex-direction:column;gap:9px;background:transparent;
+    border-right:1px solid color-mix(in srgb,var(--cl-accent) 18%,transparent);overflow:auto;position:relative;z-index:1}
   .cl-tab{display:flex;align-items:center;gap:11px;padding:10px 13px;border-radius:11px;cursor:pointer;color:var(--cl-muted);font-weight:700;
     transition:background .35s var(--cl-ease),color .35s var(--cl-ease),transform .35s var(--cl-ease)}
   .cl-tab svg{width:18px;height:18px;flex:0 0 18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
@@ -729,45 +762,50 @@
   .cl-tab.upd::after{content:'NEW';margin-left:auto;font:800 10px/1 'Nunito',sans-serif;padding:3px 6px;border-radius:6px;background:var(--cl-warn);color:#111}
   .cl-tab.lock::after{content:'скоро';margin-left:auto;font:700 10px/1 'Nunito',sans-serif;padding:3px 6px;border-radius:6px;background:color-mix(in srgb,var(--cl-text) 15%,transparent);color:var(--cl-muted)}
   .cl-navend{margin-top:auto}
-  .cl-profbtn{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:12px;cursor:pointer;color:var(--cl-text);font-weight:800;min-width:0;
-    border:1px solid color-mix(in srgb,var(--cl-accent) 25%,transparent);transition:background .35s var(--cl-ease),transform .35s var(--cl-ease)}
-  .cl-profbtn:hover{background:var(--cl-hover-soft);transform:translateX(3px)}
+  .cl-profbtn{display:flex;align-items:center;justify-content:center;padding:6px;border-radius:50%;cursor:pointer;transition:transform .35s var(--cl-ease),background .35s var(--cl-ease)}
+  .cl-profbtn:hover{transform:scale(1.08)}
   .cl-profbtn.act{background:color-mix(in srgb,var(--cl-accent) 22%,transparent)}
-  .cl-profbtn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .cl-body{flex:1;padding:20px 24px;overflow:auto;min-width:0;display:flex;flex-direction:column}
+  .cl-body{flex:1;padding:24px 32px;overflow:auto;min-width:0;display:flex;flex-direction:column;position:relative;z-index:1}
   .cl-pane{display:none}
   .cl-pane.act{display:block;animation:clPane .55s var(--cl-ease)}
   .cl-pane.act.leaving{opacity:0;transform:translateY(6px);transition:opacity .2s ease,transform .2s ease;animation:none}
-  .cl-pane.act.cl-home{display:flex;flex-direction:column;flex:1;min-height:0}
+  .cl-pane.act.cl-home{display:flex;flex-direction:column;flex:1;min-height:0;position:relative;overflow:hidden}
   .cl-pane.act.cl-col{display:flex;flex-direction:column;flex:1;min-height:0}
 
-  .cl-homever{align-self:flex-end;font:700 12px/1 Consolas,monospace;color:var(--cl-muted);padding:5px 8px;border-radius:7px;border:1px solid color-mix(in srgb,var(--cl-accent) 35%,transparent)}
-  .cl-hero{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px}
+  .cl-stars{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:0}
+  .cl-star{position:absolute;top:0;width:2px;height:2px;border-radius:50%;background:#fff;opacity:0;
+    box-shadow:0 0 6px 2px rgba(255,255,255,.55);animation:clComet linear infinite}
+  .cl-star::after{content:'';position:absolute;left:0;top:-38px;width:2px;height:38px;border-radius:2px;
+    background:linear-gradient(to top,rgba(255,255,255,.9),transparent)}
+  .cl-hero{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;position:relative;z-index:1}
   .cl-hero h2{margin:0 0 14px;font-size:36px;font-weight:800;line-height:1.2;color:var(--cl-head)}
   .cl-hero h2 em{font-style:normal;color:var(--cl-accent)}
   .cl-hero p{margin:0 0 26px;color:var(--cl-muted);font-size:17px}
   .cl-status{display:inline-flex;align-items:center;gap:10px;padding:10px 18px;border-radius:999px;max-width:560px;text-align:left;
     background:color-mix(in srgb,var(--cl-panel) 75%,transparent);border:1px solid color-mix(in srgb,var(--cl-accent) 35%,transparent);font-weight:700;font-size:14px}
-  .cl-foot{text-align:left;color:var(--cl-muted);font-size:13px;padding-top:14px;letter-spacing:.3px}
+  .cl-foot{text-align:left;color:var(--cl-muted);font-size:13px;padding-top:14px;letter-spacing:.3px;position:relative;z-index:1}
 
-  /* Профиль */
-  .cl-profcard{border-radius:20px;border:1px solid color-mix(in srgb,var(--cl-accent) 25%,transparent);background:var(--cl-field-bg);margin-bottom:14px}
-  .cl-cover{position:relative;height:170px;border-radius:19px 19px 0 0;background:var(--cl-panel-fill) center/cover no-repeat;border-bottom:1px solid color-mix(in srgb,var(--cl-accent) 25%,transparent)}
-  .cl-gear{position:absolute;top:12px;right:12px;display:flex;align-items:center;gap:7px;padding:8px 14px;border-radius:10px;cursor:pointer;font-weight:800;font-size:13px;
+  /* Профиль: баннер покрывает верх карточки, ник и должность поверх него */
+  .cl-profcard{position:relative;overflow:hidden;border-radius:20px;border:1px solid color-mix(in srgb,var(--cl-accent) 25%,transparent);background:var(--cl-field-bg);margin-bottom:14px}
+  .cl-cover{position:absolute;left:0;right:0;top:0;height:200px;background:var(--cl-panel-fill) center/cover no-repeat;border-bottom:1px solid color-mix(in srgb,var(--cl-accent) 25%,transparent);z-index:0}
+  .cl-gear{position:absolute;top:12px;right:12px;z-index:2;display:flex;align-items:center;gap:7px;padding:8px 14px;border-radius:10px;cursor:pointer;font-weight:800;font-size:13px;
     background:color-mix(in srgb,var(--cl-panel) 82%,transparent);color:var(--cl-text);border:1px solid color-mix(in srgb,var(--cl-text) 30%,transparent);backdrop-filter:blur(4px);transition:all .3s var(--cl-ease)}
   .cl-gear:hover{background:var(--cl-hover-soft);transform:translateY(-1px)}
   .cl-gear svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-  .cl-cbody{padding:0 24px 20px}
-  .cl-prow{display:flex;align-items:flex-end;gap:16px;margin-top:-48px}
-  .cl-pinfo{min-width:0;padding-bottom:8px}
-  .cl-nickrow{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-  .cl-nick{font-size:26px;font-weight:800;color:var(--cl-head);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:360px}
+  .cl-cbody{position:relative;z-index:1;padding:132px 24px 20px}
+  .cl-prow{display:flex;align-items:flex-end;gap:16px}
+  .cl-pinfo{min-width:0;padding-bottom:14px}
+  .cl-nick{font-size:26px;font-weight:800;color:var(--cl-head);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:360px;text-shadow:0 1px 6px rgba(0,0,0,.25)}
   .cl-avl,.cl-avimg{border-radius:50%;flex:0 0 auto;border:4px solid var(--cl-panel);object-fit:cover}
   .cl-avl{display:flex;align-items:center;justify-content:center;font-weight:800;outline:2px solid color-mix(in srgb,var(--cl-text) 35%,transparent);outline-offset:-2px}
-  .cl-badge{padding:4px 11px;border-radius:8px;font-size:12px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:#fff}
-  .p-user{background:#4b5563}
-  .p-dev{background:linear-gradient(90deg,#7f0000,#ff2d2d,#ff8a8a,#ff2d2d,#7f0000);background-size:300% 100%;animation:clDevFlow 3.5s linear infinite;text-shadow:0 0 6px rgba(0,0,0,.45)}
-  .p-ga{background:linear-gradient(90deg,#b91c1c,#f59e0b)}.p-zga{background:#dc2626}.p-cur{background:#0891b2}.p-adm{background:#4b5563}
+  .cl-badge{display:inline-block;margin-top:6px;padding:4px 11px;border-radius:8px;font-size:12px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.55)}
+  .cl-badge.p-user{background:#4b5563}
+  .cl-badge:not(.p-user){background-size:300% 100%;animation:clDevFlow 3s linear infinite}
+  .p-dev{background-image:linear-gradient(90deg,#450a0a,#dc2626,#fecaca,#dc2626,#450a0a)}
+  .p-ga{background-image:linear-gradient(90deg,#022c12,#16a34a,#bbf7d0,#16a34a,#022c12)}
+  .p-zga{background-image:linear-gradient(90deg,#14532d,#4ade80,#ecfdf5,#4ade80,#14532d)}
+  .p-cur{background-image:linear-gradient(90deg,#2e1065,#a855f7,#f3e8ff,#a855f7,#2e1065)}
+  .p-adm{background-image:linear-gradient(90deg,#172554,#3b82f6,#dbeafe,#3b82f6,#172554)}
   .cl-conn{margin-top:16px;padding:12px 14px;border-radius:14px;background:color-mix(in srgb,var(--cl-text) 4%,transparent)}
   .cl-conn .cl-sec{margin-bottom:6px}
   .cl-cline{display:flex;gap:10px;padding:3px 0;min-width:0}
@@ -785,14 +823,16 @@
   .cl-tline{display:flex;align-items:center;gap:10px;padding:3px 0;font-size:13px;font-weight:700}
   .cl-tline em{font-style:normal;color:var(--cl-muted);font-weight:700;min-width:62px}
   .cl-tnote{margin-top:8px;padding-top:8px;border-top:1px solid color-mix(in srgb,var(--cl-accent) 20%,transparent);color:var(--cl-muted);font-size:12px;line-height:1.5}
-  .flame{display:block;overflow:visible}
+  .flame{display:block;overflow:visible;animation:clFlick 2s ease-in-out infinite}
   .fl-o,.fl-m,.fl-c{transform-box:fill-box;transform-origin:50% 100%}
-  .fl-o{animation:clFl1 1.4s ease-in-out infinite}
-  .fl-m{animation:clFl2 1.05s ease-in-out infinite}
-  .fl-c{animation:clFl3 .8s ease-in-out infinite}
+  .fl-o{animation:clFl1 1.2s ease-in-out infinite}
+  .fl-m{animation:clFl2 .9s ease-in-out infinite}
+  .fl-c{animation:clFl3 .6s ease-in-out infinite}
+  .fl-grad .fl-o{animation:clFl1 1.2s ease-in-out infinite,clHue 5s linear infinite}
+  .fl-grad .fl-m{animation:clFl2 .9s ease-in-out infinite,clHue 5s linear infinite reverse}
 
   .cl-card{background:color-mix(in srgb,var(--cl-text) 3%,transparent);border:1px solid color-mix(in srgb,var(--cl-accent) 20%,transparent);
-    border-radius:16px;padding:14px 18px;margin-top:12px;transition:border-color .45s var(--cl-ease)}
+    border-radius:16px;padding:14px 18px;margin:14px 4px 0;transition:border-color .45s var(--cl-ease)}
   .cl-card:hover{border-color:color-mix(in srgb,var(--cl-accent) 35%,transparent)}
   .cl-sec{font-weight:800;color:var(--cl-head);margin-bottom:8px;font-size:14px}
   .cl-secrow{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px}
@@ -805,10 +845,11 @@
   .cl-in:disabled{opacity:.6}
   select.cl-in option{background:var(--cl-panel);color:var(--cl-text)}
   .cl-sw{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 4px;cursor:pointer;color:var(--cl-text);font-size:15px;font-weight:700}
-  .cl-sw input{appearance:none;width:42px;height:23px;border-radius:999px;background:color-mix(in srgb,var(--cl-text) 18%,transparent);position:relative;cursor:pointer;transition:background .4s var(--cl-ease);flex:0 0 42px}
-  .cl-sw input::after{content:'';position:absolute;top:3px;left:3px;width:17px;height:17px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.4);transition:left .4s var(--cl-ease)}
+  .cl-sw input{appearance:none;-webkit-appearance:none;width:42px;height:23px;border-radius:999px;background:color-mix(in srgb,var(--cl-text) 18%,transparent);
+    border:2px solid var(--cl-accent);position:relative;cursor:pointer;transition:background .4s var(--cl-ease);flex:0 0 42px}
+  .cl-sw input::after{content:'';position:absolute;top:1px;left:1px;width:17px;height:17px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.4);transition:left .4s var(--cl-ease)}
   .cl-sw input:checked{background:var(--cl-accent-fill)}
-  .cl-sw input:checked::after{left:22px}
+  .cl-sw input:checked::after{left:21px}
   .cl-range{width:100%;accent-color:var(--cl-accent);margin:8px 0 2px}
   .cl-seg{display:flex;gap:8px;margin:8px 0 6px;flex-wrap:wrap}
   .cl-seg label{flex:1;min-width:80px;display:flex;align-items:center;justify-content:center;text-align:center;padding:10px 8px;border-radius:11px;
@@ -830,21 +871,21 @@
   .cl-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:center}
   .cl-row.left{justify-content:flex-start}
   .cl-row .cl-btnp{margin-top:8px}
-  .cl-center{display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap;margin-top:12px}
-  .cl-center .cl-btnp{width:auto;margin-top:0;min-width:150px}
+  .cl-center{display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap;margin-top:14px}
+  .cl-center .cl-btnp{width:auto;margin-top:0;min-width:150px;justify-content:center;text-align:center}
   .cl-stop,.cl-res{display:none!important}
   .cl-stop.on,.cl-res.on{display:flex!important}
   .cl-auth{max-width:420px;margin:0 auto;padding-top:12px}
   .cl-auth h2{margin:0 0 4px;font-size:24px;font-weight:800;color:var(--cl-head)}
   .cl-auth .cl-hint{margin:0 0 16px;color:var(--cl-muted);font-size:14px}
-  .cl-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-  .cl-grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
+  .cl-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .cl-grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
   .cl-hint2{color:var(--cl-muted);font-size:13px;margin-top:8px;line-height:1.5}
   .cl-cap{color:var(--cl-muted);font-size:13px;margin:2px 0 10px}
-  .cl-top{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+  .cl-top{display:flex;align-items:center;gap:12px;margin-bottom:6px}
   .cl-top .cl-title-sm{font-size:20px;font-weight:800;color:var(--cl-head)}
 
-  .cl-setrow{display:grid;grid-template-columns:160px 1fr;gap:18px;padding:16px 0;border-bottom:1px solid color-mix(in srgb,var(--cl-accent) 14%,transparent)}
+  .cl-setrow{display:grid;grid-template-columns:160px 1fr;gap:18px;padding:16px 4px;border-bottom:1px solid color-mix(in srgb,var(--cl-accent) 14%,transparent)}
   .cl-setlbl{font-weight:800;color:var(--cl-head);padding-top:8px}
   .cl-avbig{width:112px;height:112px;border-radius:50%;overflow:hidden;cursor:pointer;border:2px dashed color-mix(in srgb,var(--cl-accent) 60%,transparent);transition:transform .3s var(--cl-ease)}
   .cl-avbig:hover{transform:scale(1.04);border-style:solid}
@@ -855,37 +896,31 @@
   .cl-urlrow .cl-in{flex:1}
   .cl-urlrow .cl-btnp{width:auto;margin-top:0;padding:10px 16px;white-space:nowrap}
 
-  .cl-subtabs,.cl-cards2{display:flex;gap:8px;margin-bottom:6px}
   .t-view,.f-view{display:none}
   .t-view.act,.f-view.act{display:block;animation:clPane .45s var(--cl-ease)}
   .t-view.menu-center.act,.f-view.menu-center.act{display:flex;flex:1;align-items:center;justify-content:center}
-  .tcards{display:flex;gap:16px;justify-content:center;flex-wrap:wrap}
+  .tcards{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin:14px 0 0}
   .tcard{width:230px;padding:26px 18px;border-radius:18px;cursor:pointer;text-align:center;border:1px solid color-mix(in srgb,var(--cl-accent) 25%,transparent);
     background:var(--cl-field-bg);transition:all .4s var(--cl-ease);display:flex;flex-direction:column;align-items:center;gap:12px}
   .tcard:hover{background:var(--cl-hover-soft);border-color:color-mix(in srgb,var(--cl-accent) 45%,transparent);transform:translateY(-2px)}
   .tcard svg{width:34px;height:34px;stroke:var(--cl-head);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
   .tcard b{font-size:17px;font-weight:800;color:var(--cl-head)}
 
-  .fcards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;width:100%;max-width:880px;margin:0 auto}
+  .fcards{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;width:100%;max-width:760px;margin:0 auto}
   .fcard{padding:26px 14px;border-radius:18px;cursor:pointer;text-align:center;border:1px solid color-mix(in srgb,var(--cl-accent) 25%,transparent);
     background:var(--cl-field-bg);transition:all .4s var(--cl-ease);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px}
   .fcard:hover{background:var(--cl-hover-soft);border-color:color-mix(in srgb,var(--cl-accent) 45%,transparent);transform:translateY(-2px)}
   .fico{width:56px;height:56px;display:flex;align-items:center;justify-content:center;font-size:34px}
   .fico svg{width:44px;height:44px;stroke:var(--cl-head);fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
-  .fico img{max-width:56px;max-height:56px;object-fit:contain}
+  .fico img{max-width:56px;max-height:56px;object-fit:contain;filter:grayscale(1) contrast(1.1)}
   .fcard b{display:block;font-size:17px;font-weight:800;color:var(--cl-head)}
   .cl-modes{display:flex;gap:8px;margin:10px 0 4px;flex-wrap:wrap}
   .cl-mode{flex:1;min-width:130px;display:flex;align-items:center;justify-content:center;padding:10px 12px;border-radius:12px;cursor:pointer;font-weight:700;color:var(--cl-muted);
     border:1px solid color-mix(in srgb,var(--cl-accent) 25%,transparent);background:var(--cl-field-bg);transition:all .35s var(--cl-ease)}
   .cl-mode:hover{background:var(--cl-hover-soft);color:var(--cl-text)}
   .cl-mode.act{background:var(--cl-accent-fill);border-color:var(--cl-accent);color:var(--cl-on-accent)}
-  .cl-drop{margin-top:10px;border:1.5px dashed color-mix(in srgb,var(--cl-accent) 55%,transparent);border-radius:14px;padding:14px;
-    display:flex;align-items:center;justify-content:center;gap:12px;cursor:pointer;outline:none;transition:all .35s var(--cl-ease)}
-  .cl-drop:hover,.cl-drop:focus,.cl-drop.drag{border-style:solid;border-color:var(--cl-accent);background:var(--cl-hover-soft)}
-  .cl-drop-ico{width:40px;height:40px;flex:0 0 40px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--cl-accent) 22%,transparent);font-size:20px;font-weight:800}
-  .cl-drop b{display:block;color:var(--cl-head);font-size:14px}
 
-  .th-sec{margin-top:12px;padding:14px 18px;border-radius:16px;border:1px solid color-mix(in srgb,var(--cl-accent) 20%,transparent);background:color-mix(in srgb,var(--cl-text) 3%,transparent)}
+  .th-sec{margin-top:14px;padding:14px 18px;border-radius:16px;border:1px solid color-mix(in srgb,var(--cl-accent) 20%,transparent);background:color-mix(in srgb,var(--cl-text) 3%,transparent)}
   .th-row{display:flex;align-items:center;gap:12px;margin-top:10px;flex-wrap:wrap}
   .th-lab{width:70px;color:var(--cl-muted);font-size:13px;font-weight:700}
   .th-sw{display:flex;gap:10px;flex-wrap:wrap}
@@ -903,7 +938,6 @@
   .fx-chips label:hover{background:var(--cl-hover-soft)}
   .fx-chips input{display:none}
   .fx-chips label:has(input:checked){background:var(--cl-accent-fill);border-color:var(--cl-accent);color:var(--cl-on-accent)}
-  .fx-chips label:has(input:checked) .mono{filter:none}
   .chars{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:8px}
   .chars label{display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px 6px;border-radius:12px;cursor:pointer;text-align:center;font-size:13px;font-weight:700;
     border:1px solid color-mix(in srgb,var(--cl-accent) 28%,transparent);background:var(--cl-field-bg);transition:all .3s var(--cl-ease)}
@@ -943,7 +977,7 @@
 
   .job{display:flex;align-items:center;gap:14px;padding:12px 14px;border-radius:14px;margin-top:10px;
     border:1px solid color-mix(in srgb,var(--cl-accent) 22%,transparent);background:var(--cl-field-bg)}
-  .jdate{flex:0 0 118px;font:700 13px/1.4 Consolas,monospace;color:var(--cl-accent);text-align:left}
+  .jdate{flex:0 0 130px;font:700 13px/1.4 Consolas,monospace;color:var(--cl-accent);text-align:left}
   .job-main{flex:1;min-width:0}
   .job-main b{display:block;color:var(--cl-head);font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .job-main span{display:block;color:var(--cl-muted);font-size:13px;margin-top:2px}
@@ -961,13 +995,23 @@
     opacity:0;visibility:hidden;transition:opacity .5s var(--cl-ease),transform .6s var(--cl-ease),visibility 0s .6s}
   #cl-win.open{opacity:1;visibility:visible;transform:translate(-50%,-50%);transition:opacity .45s var(--cl-ease),transform .5s var(--cl-ease),visibility 0s}
   .cl-whead-btns{display:flex;gap:8px;align-items:center}
-  .cl-wbody{overflow:auto;flex:1;padding:0 0 14px;font-size:15px;line-height:1.6;color:var(--cl-text)}
+  .cl-whead-btns .cl-btnp{margin-top:0}
+  #cl-win .cl-wbody{overflow:auto;flex:1;padding:0 0 14px;font-size:15px;line-height:1.6;color:var(--cl-text)}
+  .found{display:flex;justify-content:space-between;align-items:center;padding:14px 22px;font-weight:800;color:var(--cl-head);
+    border-bottom:1px solid color-mix(in srgb,var(--cl-accent) 30%,transparent);background:var(--cl-field-bg)}
+  .found span{font-weight:700;color:var(--cl-muted);font-size:13px}
   .r{display:grid;grid-template-columns:186px 1fr;gap:16px;padding:10px 22px;border-bottom:1px solid color-mix(in srgb,var(--cl-accent) 12%,transparent);transition:background .25s}
   .r:hover{background:var(--cl-hover-soft)}
+  .r.sel-able{cursor:pointer}
+  .r.sel{background:color-mix(in srgb,var(--cl-accent) 20%,transparent);box-shadow:inset 3px 0 0 var(--cl-accent)}
   .d{color:var(--cl-muted);font:13px/1.8 Consolas,monospace;padding-top:1px}
   .t{word-break:break-word}
   .nk{color:var(--cl-head);font-weight:800}
-  .mn{color:#ca8a04;font-weight:800}
+  .mn{color:#22c55e;font-weight:800}
+  .az{color:#facc15;font-weight:800}
+  .car{color:#9ca3af;font-weight:800}
+  .cnt{color:#f472b6;font-weight:800}
+  .ip{color:#fca5a5;opacity:.75;font-weight:700}
   .plus{color:#16a34a;font-weight:800;margin-left:8px;white-space:nowrap}
   .minus{color:#dc2626;font-weight:800;margin-left:8px;white-space:nowrap}
   .sec{position:sticky;top:0;z-index:1;display:flex;justify-content:space-between;align-items:center;padding:11px 22px;
@@ -986,9 +1030,6 @@
   .sum .earn{color:#16a34a}
   .sum .spend{color:#dc2626}
   .sum .diff{color:#ca8a04}
-  .onl{padding:8px 22px 14px}
-  .onl div{display:flex;gap:10px;padding:6px 0;font-size:16px;font-weight:700}
-  .onl div span{color:var(--cl-muted);min-width:190px}
   `;
 
   const ICON = {
@@ -1000,10 +1041,14 @@
     chat: '<svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
     info: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v5h1"/></svg>',
     dev: '<svg viewBox="0 0 24 24"><path d="M8 8l-5 4 5 4M16 8l5 4-5 4M14 5l-4 14"/></svg>',
-    dollar: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M14.5 9a2.5 2 0 0 0-2.5-1.5c-1.4 0-2.5.8-2.5 2s1 1.7 2.5 2 2.5.8 2.5 2-1.1 2-2.5 2A2.5 2 0 0 1 9.5 15M12 6v1.5M12 16.5V18"/></svg>',
-    clock: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+    dollar: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M14.5 9a2.5 2 0 0 0-2.5-1.5c-1.4 0-2.5.8-2.5 2s1 1.7 2.5 2 2.5.8 2.5 2-1.1 2-2.5 2A2.5 2.5 0 0 1 9.5 15M12 6v1.5M12 16.5V18"/></svg>',
     sliders: '<svg viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>',
     doc: '<svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h7M9 17h7"/></svg>',
+    eye: '<svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+    brush: '<svg viewBox="0 0 24 24"><path d="M14 4l6 6-9 9H5v-6z"/><path d="M12 6l6 6"/></svg>',
+    wand: '<svg viewBox="0 0 24 24"><path d="M4 20L16 8M14 4l1 2 2 1-2 1-1 2-1-2-2-1 2-1zM19 12l.7 1.3L21 14l-1.3.7L19 16l-.7-1.3L17 14l1.3-.7z"/></svg>',
+    film: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/></svg>',
+    chain: '<svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>',
   };
 
   /* ---------- Тема ---------- */
@@ -1032,6 +1077,7 @@
     set('--cl-text', panelLight ? '#14121c' : '#ebe8f5');
     set('--cl-muted', panelLight ? '#5b5670' : '#9b93b5');
     set('--cl-head', panelLight ? '#0b0a12' : '#ffffff');
+    set('--cl-title', panelLight ? '#000000' : '#ffffff');
     set('--cl-field-bg', panelLight ? 'rgba(0,0,0,.05)' : 'rgba(255,255,255,.07)');
     set('--cl-field-text', panelLight ? '#14121c' : '#f4f1fb');
     set('--cl-on-accent', accLight ? '#000000' : '#ffffff');
@@ -1073,26 +1119,40 @@
     saveTheme({ [key]: { ...getTheme()[key], [part]: color } });
   }
 
-  /* ---------- Анимация меню (чёрно-белая / одного цвета) ---------- */
-  const FX_EMOJI = { star: '⭐', butterfly: '🦋', sun: '☀️', bolt: '⚡', snow: '❄️', bat: '🦇' };
-  function renderFx() {
-    const fx = { ...DEF.fx, ...(cfg('fx') || {}) };
-    const box = q('#cl-fx');
-    if (!box) return;
-    applyTheme();
-    if (fx.type === 'off') { box.innerHTML = ''; return; }
+  /* ---------- Анимации меню ---------- */
+  const FX_EMOJI = { bow: '🎀', sun: '☀️', bolt: '⚡', snow: '❄️', bat: '🦇' };
+  function buildFx(fx, sc) {
     let html = '';
+    const img = fx.type === 'makima' ? charImg(charById(cfg('char'))) : '';
     for (let i = 0; i < fx.count; i++) {
       const left = Math.random() * 100;
-      const size = 14 + Math.random() * 12;
+      const size = (14 + Math.random() * 12) * sc;
       const dur = fx.speed * (0.8 + Math.random() * 0.4);
       const delay = -Math.random() * fx.speed;
       const inner = fx.type === 'makima'
-        ? `<i style="width:${size + 12}px;height:${(size + 12) * 1.3}px;-webkit-mask-image:url('${charImg(charById(cfg('char')))}');mask-image:url('${charImg(charById(cfg('char')))}')"></i>`
-        : `<span style="font-size:${size}px">${FX_EMOJI[fx.type] || '⭐'}</span>`;
+        ? `<i style="width:${size + 12}px;height:${(size + 12) * 1.3}px;-webkit-mask-image:url('${img}');mask-image:url('${img}')"></i>`
+        : `<span style="font-size:${size}px">${FX_EMOJI[fx.type] || '❄️'}</span>`;
       html += `<div class="fxp" style="left:${left}%;animation-duration:${dur}s;animation-delay:${delay}s">${inner}</div>`;
     }
-    box.innerHTML = html;
+    return html;
+  }
+  function renderFx() {
+    const fx = { ...DEF.fx, ...(cfg('fx') || {}) };
+    if (!FX_TYPES.some(f => f[0] === fx.type)) fx.type = 'snow';
+    applyTheme();
+    const html = fx.type === 'off' ? '' : buildFx(fx, (fx.size || 100) / 100);
+    ['#cl-fx', '#cl-wfx'].forEach(id => { const b = q(id); if (b) b.innerHTML = html; });
+  }
+  // Главная: редкие кометы, падают вертикально
+  function renderHomeStars() {
+    const html = Array.from({ length: 7 }, (_, i) => {
+      const left = 6 + i * 14 + Math.random() * 6;
+      const dur = 9 + Math.random() * 5;
+      const delay = -(i * 3.5 + Math.random() * 3);
+      return `<span class="cl-star" style="left:${left.toFixed(1)}%;animation-duration:${dur.toFixed(2)}s;animation-delay:${delay.toFixed(2)}s"></span>`;
+    }).join('');
+    const box = q('#cl-stars');
+    if (box) box.innerHTML = html;
   }
 
   /* ---------- Персонаж запуска и его фразы ---------- */
@@ -1190,14 +1250,18 @@
     const L = ((acc && acc.nick) || '?')[0].toUpperCase();
     return `<div class="cl-avl" style="width:${size}px;height:${size}px;font-size:${Math.round(size * 0.46)}px;background:var(--cl-panel-fill);color:${light ? '#000' : '#fff'}">${esc(L)}</div>`;
   }
+  // Аватар с контуром цвета должности
+  function ringAv(acc, size) {
+    const c = ROLE_COLOR[acc ? curRole() : 'Пользователь'] || '#9ca3af';
+    return `<span style="display:inline-flex;border-radius:50%;box-shadow:0 0 0 3px ${c}">${avatarHtml(acc, size)}</span>`;
+  }
   function renderProfile() {
     const acc = getAcc();
     const days = (cfg('streak') || {}).days || 0;
     const t = tierOf(days);
     q('#cl-cover').style.backgroundImage = acc && acc.banner ? `url("${acc.banner}")` : '';
     q('#cl-av').innerHTML = avatarHtml(acc, 96);
-    q('#cl-profbtn-av').innerHTML = avatarHtml(acc, 30);
-    q('#cl-profbtn-nick').textContent = acc ? acc.nick : 'Профиль';
+    q('#cl-profbtn-av').innerHTML = ringAv(acc, 38);
     q('#cl-pnick').textContent = acc ? acc.nick : 'Гость';
     const role = acc ? curRole() : '';
     q('#cl-badges').innerHTML = acc ? `<span class="cl-badge ${POS_CLS[role] || 'p-user'}">${esc(role)}</span>` : '';
@@ -1212,7 +1276,7 @@
     q('#cl-streakdays').textContent = String(days);
     q('#cl-flametip').innerHTML = TIERS.filter(x => x.d > 0).map(x =>
       `<div class="cl-tline">${flameSvg(x, 22)}<em>${x.d} ${plural(x.d, ['день', 'дня', 'дней'])}</em><span>${x.name}</span></div>`).join('') +
-      `<div class="cl-tnote">При ${STREAK_PROTECT} днях огонёк не сбрасывается после неактива</div>`;
+      `<div class="cl-tnote">Огонёк сбросится, если не заходить в скрипт ${STREAK_RESET_DAYS} дней. После ${STREAK_PROTECT} дней огонёк не сбрасывается</div>`;
   }
 
   function renderAccountForm() {
@@ -1223,25 +1287,29 @@
     q('#cl-tg').value = acc.tg || '';
     if (acc.server) q('#cl-acc-server').value = acc.server;
     const posSel = q('#cl-acc-pos'), own = acc.key === OWNER_NICK;
-    posSel.innerHTML = own ? '<option>Разработчик</option>' : POSITIONS.map(p => `<option value="${p}">${p}</option>`).join('');
+    const cur = acc.position || 'Администратор';
+    const opts = own ? ['Разработчик'] : (SELF_POSITIONS.includes(cur) ? SELF_POSITIONS : [cur, ...SELF_POSITIONS]);
+    posSel.innerHTML = opts.map(p => `<option value="${p}">${p}</option>`).join('');
     posSel.disabled = own;
     q('#cl-acc-posgo').disabled = own;
-    if (!own) posSel.value = acc.position || 'Администратор';
+    if (!own) posSel.value = cur;
+    q('#cl-delacc').style.display = own ? 'none' : '';
   }
 
   /* ---------- Настройки: синхронизация элементов с сохранённым ---------- */
   function renderBgPreview() {
-    qa('.cl-banner-r').forEach(r => { r.checked = r.value === cfg('banner') && !(cfg('bgOn') && cfg('bgUrl')); });
+    qa('.cl-banner-r').forEach(r => { r.checked = r.value === cfg('banner'); });
     q('#cl-blur').value = cfg('blur');
     q('#cl-blurv').textContent = cfg('blur');
   }
   function syncSettingsUI() {
     renderBgPreview();
     qa('input[name="cl-per"]').forEach(r => { r.checked = +r.value === perReq(); });
-    qa('input[name="cl-cd"]').forEach(r => { r.checked = +r.value === cdSec(); });
     qa('input[name="cl-lim"]').forEach(r => { r.checked = +r.value === +cfg('limit'); });
+    q('#cl-cd-in').value = cdSec();
     q('#cl-ipb').checked = !!cfg('ipHide');
     q('#cl-moneyb').checked = !!cfg('moneyHide');
+    q('#cl-dateb').checked = !!cfg('dateHide');
     q('#cl-limon').checked = !!cfg('limitOn');
     q('#cl-savelogs').checked = !!cfg('saveLogs');
     q('#cl-savefile').checked = !!cfg('saveFile');
@@ -1251,6 +1319,7 @@
     q('#cl-fx-color').value = fx.color;
     q('#cl-fx-count').value = fx.count; q('#cl-fx-countv').textContent = fx.count;
     q('#cl-fx-speed').value = fx.speed; q('#cl-fx-speedv').textContent = fx.speed;
+    q('#cl-fx-size').value = fx.size || 100; q('#cl-fx-sizev').textContent = fx.size || 100;
     qa('input[name="cl-char"]').forEach(r => { r.checked = r.value === cfg('char'); });
     q('#cl-chartheme').checked = !!cfg('charTheme');
     const sc = Math.round((+cfg('btnScale') || 1) * 100);
@@ -1259,7 +1328,7 @@
     qa('.cl-dl').forEach(b => { b.style.display = cfg('allowDl') ? '' : 'none'; });
   }
   function resetLogsSettings() {
-    ['bgUrl', 'bgOn', 'banner', 'blur', 'ipHide', 'moneyHide', 'perReq', 'cd', 'saveLogs', 'saveFile', 'allowDl', 'limit', 'limitOn']
+    ['bgUrl', 'banner', 'blur', 'ipHide', 'dateHide', 'moneyHide', 'perReq', 'cd', 'saveLogs', 'saveFile', 'allowDl', 'limit', 'limitOn']
       .forEach(k => setCfg(k, DEF[k]));
     applyBg(); syncSettingsUI(); renderLogs();
     q('#cl-bg-msg').textContent = '';
@@ -1272,7 +1341,7 @@
     q('#cl-reset-script-msg').textContent = 'Настройки скрипта сброшены';
   }
 
-  /* ---------- Логи: сохранённые проверки ---------- */
+  /* ---------- Лог Проверки: сохранённые проверки ---------- */
   function pausedFor(kind) { return cfg('jobs').find(j => j.kind === kind && !j.done) || null; }
   function renderResumeBtns() {
     qa('.cl-res').forEach(b => {
@@ -1290,12 +1359,12 @@
           <span>${j.done ? 'готово' : 'остановлено'} · строк: ${j.rows.length} · дошли до ${esc(j.cursor)}</span></div>
         <div class="job-act">
           <button class="cl-btnp small sec" data-act="open" data-id="${j.id}">Открыть</button>
-          ${cfg('allowDl') ? `<button class="cl-btnp small sec" data-act="txt" data-id="${j.id}">TXT</button>` : ''}
+          ${cfg('allowDl') ? `<button class="cl-btnp small sec" data-act="dl" data-id="${j.id}">Скачать</button>` : ''}
           ${j.done ? '' : `<button class="cl-btnp small" data-act="resume" data-id="${j.id}">Продолжить</button>`}
           <button class="cl-btnp small sec danger" data-act="del" data-id="${j.id}">Удалить</button>
         </div>
       </div>`).join('')
-      : infoHtml('Здесь появятся проверки: Пробив, Махинатор, Вирты и Онлайн с датой и результатом');
+      : infoHtml('Здесь появятся проверки: Пробив, Махинатор и Вирты с датой и результатом');
   }
 
   /* ---------- Доступ по ролям ---------- */
@@ -1308,7 +1377,7 @@
     const on = isOwner() && !!cfg('devRole');
     chip.classList.toggle('on', on);
     q('#cl-test-name').textContent = 'Тест: ' + (cfg('devRole') || '');
-    if (q('#cl-dev-role')) q('#cl-dev-cur').textContent = cfg('devRole') ? `Включён тестовый режим: ${cfg('devRole')}` : 'Тестовый режим выключен — у тебя роль «Разработчик»';
+    if (q('#cl-dev-cur')) q('#cl-dev-cur').textContent = cfg('devRole') ? `Включён тестовый режим: ${cfg('devRole')}` : 'Тестовый режим выключен — у тебя роль «Разработчик»';
   }
 
   function renderAuth() {
@@ -1320,6 +1389,7 @@
     renderStatus();
     renderResumeBtns();
     renderLogs();
+    renderDevUsers();
     applyAccess();
   }
 
@@ -1349,7 +1419,7 @@
       catch (e) { say2('Ошибка: ' + e.message); }
     };
     const fromFile = async file => {
-      try { say2('Читаю файл…'); await finish(await readFile(file, o.maxMB)); }
+      try { say2('Читаю файл…'); await finish(await readFile(file, MAX_UPLOAD_MB)); }
       catch (e) { say2('Ошибка: ' + e.message); }
     };
     const fromUrl = async u => {
@@ -1401,17 +1471,17 @@
     });
   }
 
-  /* Фон логов: одно поле — вставил ссылку или картинку, фон сразу применился, поле очистилось */
+  /* Фон логов: одно поле — вставил ссылку или картинку, сохраняется и включает «Кастомный» */
   function bindBgInput() {
     const inp = q('#cl-bg-in'), st = q('#cl-bg-msg'), fileIn = q('#cl-bg-file');
     const done = src => {
-      setCfg('bgUrl', src); setCfg('bgOn', true);
+      setCfg('bgUrl', src); setCfg('banner', 'custom');
       inp.value = '';
       applyBg(); renderBgPreview();
       st.textContent = 'Фон применён';
     };
     const fromFile = async f => {
-      try { st.textContent = 'Читаю файл…'; done(await readFile(f, 4)); }
+      try { st.textContent = 'Читаю файл…'; done(await readFile(f, MAX_UPLOAD_MB)); }
       catch (e) { st.textContent = 'Ошибка: ' + e.message; }
     };
     const fromUrl = async u => {
@@ -1438,7 +1508,7 @@
     fileIn.addEventListener('change', () => { if (fileIn.files[0]) fromFile(fileIn.files[0]); fileIn.value = ''; });
   }
 
-  /* ---------- Профиль: ник, пароль, сервер, должность, связь ---------- */
+  /* ---------- Профиль: ник, пароль, сервер, роль, связь ---------- */
   async function changeNick() {
     const say3 = s => { q('#cl-acc-msg1').textContent = s; };
     const acc = getAcc();
@@ -1483,14 +1553,25 @@
     renderAuth();
     q('#cl-acc-msg1').textContent = 'Сервер сохранён';
   }
+  // Себе можно выдать роль не выше «Куратор»
   function changePosition() {
     const acc = getAcc();
     if (!acc || acc.key === OWNER_NICK) return;
     const v = q('#cl-acc-pos').value;
-    if (!POSITIONS.includes(v)) return;
+    if (!SELF_POSITIONS.includes(v) && v !== acc.position) return;
     saveAcc(acc.key, { position: v });
     renderAuth();
-    q('#cl-acc-msg3').textContent = 'Должность сохранена: ' + v;
+    q('#cl-acc-msg3').textContent = 'Роль сохранена: ' + v;
+  }
+  function giveRole() {
+    if (!isOwner()) return;
+    const key = q('#cl-dev-user').value, pos = q('#cl-dev-pos').value;
+    const msg = s => { q('#cl-dev-msg').textContent = s; };
+    if (!key || key === OWNER_NICK) return msg('Эту роль поменять нельзя');
+    if (!POSITIONS.includes(pos)) return msg('Выбери должность');
+    saveAcc(key, { position: pos });
+    renderDevUsers();
+    msg(`Роль «${pos}» выдана: ${cfg('accounts')[key].nick}`);
   }
   function saveContacts() {
     const acc = getAcc();
@@ -1511,6 +1592,50 @@
     applyBg();
     refreshUpdate(false);
     activateTab('home', true);
+  }
+
+  /* ---------- Удаление аккаунта и скрипта ---------- */
+  function renderDel() {
+    const m = q('#cl-del'), box = q('#cl-del-box'), s = m.dataset.step;
+    const btn2 = (act, label, cls) => `<button class="cl-btnp ${cls}" data-d="${act}">${label}</button>`;
+    let h = '', btns = '';
+    if (s === '1') {
+      h = `<div class="cl-del-steps">Шаг 1 из 3</div><h3>Удалить аккаунт и скрипт?</h3>
+        <p>Аккаунт, профиль, настройки и данные скрипта будут удалены из этого браузера.</p>`;
+      btns = btn2('cancel', 'Отмена', 'sec') + btn2('next', 'Далее', 'danger');
+    } else if (s === '2') {
+      h = `<div class="cl-del-steps">Шаг 2 из 3</div><h3>Вернуть назад будет нельзя</h3>
+        <p>Восстановить аккаунт и данные после удаления не получится. Скрипт перестанет работать в этом браузере.</p>`;
+      btns = btn2('cancel', 'Отмена', 'sec') + btn2('next', 'Я понимаю, далее', 'danger');
+    } else if (s === '3') {
+      h = `<div class="cl-del-steps">Шаг 3 из 3</div><h3>Сохранить лог проверок?</h3>
+        <p>Перед удалением можно скачать все сохранённые проверки одним файлом.</p>`;
+      btns = btn2('del-no', 'Не сохранять, удалить', 'danger') + btn2('del-yes', 'Сохранить и удалить', 'danger') + btn2('cancel', 'Отмена', 'sec');
+    } else {
+      h = `<h3>Аккаунт удалён</h3>
+        <p>Данные очищены. Чтобы полностью убрать скрипт, удали его в Tampermonkey. Потом перезагрузи страницу.</p>`;
+      btns = btn2('close', 'Закрыть', 'sec');
+    }
+    box.innerHTML = `${h}<div class="cl-del-row">${btns}</div>`;
+  }
+  function openDel() {
+    const m = q('#cl-del');
+    m.dataset.step = '1';
+    renderDel();
+    m.classList.add('open');
+  }
+  function performDelete(save) {
+    if (save && cfg('jobs').length) {
+      const text = cfg('jobs').map(j => jobTxt(j, j.done ? 'готово' : 'остановлено')).join('\n\n' + '='.repeat(50) + '\n\n');
+      saveText(`CustomLogs_все_проверки_${fileDate(Date.now())}.txt`, text);
+    }
+    Object.keys(KEY).forEach(k => GM_setValue(KEY[k], DEF[k]));
+    GM_setValue('cl_deleted', true);
+    q('#cl-del').dataset.step = 'done';
+    renderDel();
+    panel.classList.remove('open');
+    btn.style.display = 'none';
+    bgHost.style.display = 'none';
   }
 
   /* ---------- Обновления ---------- */
@@ -1536,8 +1661,8 @@
     const text = level === 'red'
       ? `${acc.nick}, ты совсем афигел${f}?\nДавай обновимся, я хочу посмотреть свои новые обновки 😢`
       : level === 'blocked'
-        ? 'Скрипт остановлен. Нажми на меня и установи обновление во вкладке «Обновления»'
-        : `${acc.nick}, проверь вкладку Обновления, там что-то новенькое`;
+        ? 'Скрипт остановлен. Нажми на меня и установи обновление во вкладке «О скрипте»'
+        : `${acc.nick}, проверь вкладку О скрипте, там что-то новенькое`;
     sayOrDefer(() => say(text, level === 'yellow' ? 'warn' : 'red', 9000));
   }
   function refreshUpdate(announce) {
@@ -1574,7 +1699,7 @@
       refreshUpdate(true);
       if (manual) {
         msg.textContent = cmpVer(remote, VERSION_NUM) > 0
-          ? `Есть обновление: ${VERSION_NUM} → ${remote}. Нажми «Обновить».`
+          ? `Есть обновление: ${VERSION_NUM} → ${remote}. Нажми «Скачать».`
           : `У тебя последняя версия (${VERSION_NUM}).`;
       }
     } catch (e) {
@@ -1590,13 +1715,12 @@
     }).join('') || infoHtml('Список изменений не указан');
   }
   function renderVersions() {
-    q('#cl-verlist').innerHTML = CHANGELOG.map((e, i) => `
+    q('#cl-verlist').innerHTML = CHANGELOG.slice(0, 5).map((e, i) => `
       <details class="ver"${i === 0 ? ' open' : ''}>
         <summary><span>v${esc(e.version)} · ${esc(e.date || '')}${i === 0 ? ' · последняя' : ''}${e.global ? '<span class="gl">Глобальное обновление</span>' : ''}</span></summary>
         <div class="ver-body">${itemsHtml(e.items)}</div>
       </details>`).join('');
   }
-  let closeUpResetPos = () => {};
   function showUpdatePopupIfNeeded() {
     const last = cfg('lastSeen');
     if (!last) { setCfg('lastSeen', VERSION_NUM); return; }
@@ -1606,6 +1730,7 @@
     q('#cl-upv').textContent = 'v' + VERSION_NUM;
     q('#cl-upglobal').style.display = entry && entry.global ? 'inline-block' : 'none';
     q('#cl-upbody').innerHTML = itemsHtml(entry ? entry.items : []);
+    q('#cl-upbar-i').style.animationDuration = POPUP_MS + 'ms';
     const pop = q('#cl-upopup');
     pop.classList.add('open');
     const close = () => pop.classList.remove('open');
@@ -1630,12 +1755,10 @@
 
   /* =========================================================
      ПРОВЕРКИ ЛОГОВ
-     Скрипт идёт назад от «до» пачками по N строк (Запросы).
-     Между пачками пауза КД. Пачка на 150-300 строк занимает не меньше 5 сек, на 500-1000 не меньше 10 сек.
      ========================================================= */
   function gate() {
     if (!isLogged()) return 'Сначала войди в аккаунт';
-    if (updState().blocked) return 'Скрипт остановлен: установи обновление во вкладке «Обновления»';
+    if (updState().blocked) return 'Скрипт остановлен: установи обновление во вкладке «О скрипте»';
     return '';
   }
   const msgFor = (kind, text) => { const el = q(MSG_ID[kind]); if (el) el.textContent = text; };
@@ -1658,6 +1781,7 @@
       id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
       kind, title, params, from, to, cursor: to,
       boundSeen: [], rows: [], pages: 0, scanned: 0, done: false, created: Date.now(),
+      errors: [], spent: 0,
     };
   }
   function saveJob(job) {
@@ -1683,6 +1807,7 @@
       if (res.status === 429) {
         if (++retry > MAX_RETRY_429) throw new Error('сайт ограничил запросы (HTTP 429)');
         const sec = 20 * retry;
+        (job.errors ||= []).push(`HTTP 429, пауза ${sec} сек`);
         setMsg(`Сайт ограничил запросы, жду ${sec} сек…`);
         await pause(sec * 1000);
         continue;
@@ -1704,31 +1829,9 @@
     }
   }
 
-  /* Длительность сессии из строки: «01:23:45» или «1 ч 23 мин 45 сек» */
-  function parseSession(a) {
-    let m = a.match(/(?:сесс\S*|онлайн|время)[^\d]{0,25}(\d{1,3}):(\d{2}):(\d{2})/i);
-    if (m) return +m[1] * 3600 + +m[2] * 60 + +m[3];
-    m = a.match(/(?:сесс\S*|онлайн|время)[^\d]{0,25}((?:\d+\s*(?:часов|часа|час|ч|минут|мин|м|секунд|сек|с)\.?[\s,]*){1,3})/i);
-    if (!m) return 0;
-    let sec = 0;
-    for (const t of m[1].matchAll(/(\d+)\s*(часов|часа|час|ч|минут|мин|м|секунд|сек|с)/gi)) {
-      const u = t[2].toLowerCase();
-      sec += +t[1] * (u.startsWith('ч') ? 3600 : u.startsWith('м') ? 60 : 1);
-    }
-    return sec;
-  }
-  function onlineMatch(r) {
-    const a = r.action;
-    if (ON_OUT_RE.test(a)) return [{ t: r.time, a, ev: 'out', dur: parseSession(a) }];
-    if (ON_IN_RE.test(a)) return [{ t: r.time, a, ev: 'in' }];
-    if (ON_REP_RE.test(a)) return [{ t: r.time, a, ev: 'rep' }];
-    return [];
-  }
-
   function matchRow(job, r) {
     const P = job.params;
     const low = r.full.toLowerCase();
-    if (job.kind === 'online') return onlineMatch(r);
     if (job.kind === 'probiv') {
       if (P.nick && !low.includes(P.nick.toLowerCase())) return [];
       if (P.kws.length && !P.kws.some(k => low.includes(k))) return [];
@@ -1771,7 +1874,7 @@
     const acc = getAcc();
     const per = perReq();
     const cd = cdSec() * 1000;
-    const minCycle = (per >= 500 ? 10 : 5) * 1000;
+    const started = Date.now();
     let stopped = false;
     try {
       for (;;) {
@@ -1790,27 +1893,30 @@
           if (r.time === job.cursor && seen.has(r.time + '|' + r.action)) continue;
           for (const h of matchRow(job, r)) if (job.rows.length < ROW_CAP) job.rows.push(h);
         }
-        if (oldest < job.from) { job.done = true; break; }
+        if (page.length < per || oldest < job.from) { job.done = true; break; }
         let next = oldest;
         let bs = page.filter(r => r.time === oldest).map(r => r.time + '|' + r.action);
         if (next === job.cursor) { next = addSec(oldest, -1); bs = []; }
         job.cursor = next;
         job.boundSeen = bs;
         if (job.pages % SAVE_EVERY === 0) saveJob(job);
-        await pause(Math.max(cd, minCycle - (Date.now() - t0)));
+        await pause(Math.max(0, cd - (Date.now() - t0)));
       }
     } catch (e) {
+      job.spent = (job.spent || 0) + (Date.now() - started);
+      job.errors.push(e.message);
       busy = false;
       setStop(job.kind, false);
       saveJob(job);
       writeTxt(job, 'сбой');
       say(CRASH_TEXT, 'red', 12000);
-      setMsg(`Сбой: ${e.message}. Прогресс сохранён во вкладке «Логи»` + (cfg('allowDl') ? ', файл скачан' : ''));
+      setMsg(`Сбой: ${e.message}. Прогресс сохранён в «Лог Проверки»` + (cfg('allowDl') ? ', файл скачан' : ''));
       renderResumeBtns();
       renderLogs();
       job.failed = true;
       return;
     }
+    job.spent = (job.spent || 0) + (Date.now() - started);
     busy = false;
     setStop(job.kind, false);
     saveJob(job);
@@ -1821,7 +1927,7 @@
       if (cfg('saveFile')) writeTxt(job, 'готово');
       if (!job.noSay) announceDone();
     } else if (stopped) {
-      setMsg('Остановлено. Продолжить можно кнопкой «Продолжить» или во вкладке «Логи»');
+      setMsg('Остановлено. Продолжить можно кнопкой «Продолжить» или в «Лог Проверки»');
     }
   }
   function announceDone() {
@@ -1842,12 +1948,12 @@
 
   /* ---------- Файл .txt: сохранение и загрузка ---------- */
   function rowLine(kind, r) {
-    if (kind === 'probiv' || kind === 'online') return `${r.t} | ${r.a}`;
+    if (kind === 'probiv') return `${r.t} | ${r.a}`;
     if (kind === 'mech') return `[${r.cat}] ${r.t} | ${r.who} | ${r.a}`;
     return `${r.sign}${r.amt} | ${r.t} | ${r.a}`;
   }
-  function download(name, text) {
-    if (!cfg('allowDl')) return;
+  // Скачивание файла без проверки настроек (используется при удалении аккаунта)
+  function saveText(name, text) {
     const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -1857,22 +1963,30 @@
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   }
-  function jobTxt(job, status) {
+  function download(name, text) {
+    if (!cfg('allowDl')) return;
+    saveText(name, text);
+  }
+  function jobTxt(job, status, rows) {
+    rows = rows || job.rows;
     const P = job.params;
     const head = [
-      `# CustomLogs — ${job.title}`,
-      `# Вид: ${job.kind}`,
-      `# Ник: ${P.nick || '—'}`,
-      `# Ключевые слова: ${(P.kws || []).join(', ') || '—'}`,
-      `# Тип: ${P.typeLabel || '—'}`,
-      `# Дата проверки: ${dateTimeRu(job.created)}`,
-      `# Период: ${job.from} — ${job.to}`,
-      `# Курсор: ${job.cursor}`,
-      `# Статус: ${status}`,
-      `# Строк найдено: ${job.rows.length}`,
+      `Вид: ${job.kind}`,
+      `Дата пробива: ${dateTimeRu(job.created)}`,
+      `Период от: ${job.from}`,
+      `Период до: ${job.to}`,
+      `Ник пользователя: ${P.nick || '—'}`,
+      `Искали: ${(P.kws || []).join(', ') || '—'}`,
+      `Тип запроса: ${P.typeLabel || '—'}`,
+      `Строк просмотрено: ${job.scanned || 0}`,
+      `Строк найдено: ${rows.length}`,
+      `Ошибки поиска: ${(job.errors || []).join('; ') || 'нет'}`,
+      `Время поиска: ${fmtDur((job.spent || 0) / 1000)}`,
+      `Статус: ${status}`,
+      `Курсор: ${job.cursor}`,
       '-'.repeat(50),
     ];
-    return [...head, ...job.rows.map(r => rowLine(job.kind, r))].join('\n');
+    return [...head, ...rows.map(r => rowLine(job.kind, r))].join('\n');
   }
   function writeTxt(job, status) {
     const P = job.params;
@@ -1885,7 +1999,7 @@
     for (const line of text.split(/\r?\n/)) {
       if (!body) {
         if (/^-{5,}/.test(line)) { body = true; continue; }
-        const m = line.match(/^#\s*([^:]+):\s*(.*)$/);
+        const m = line.match(/^([^:]+):\s*(.*)$/);
         if (m) H[m[1].trim()] = m[2].trim();
         continue;
       }
@@ -1903,14 +2017,13 @@
     if (isBusy()) return msgFor('probiv', 'Сначала дождись окончания текущей проверки');
     try {
       const { H, rows } = parseTxt(await file.text());
-      if (!H['Вид'] || !H['Курсор'] || !H['Период']) throw new Error('это не файл CustomLogs');
+      if (!H['Вид'] || !H['Курсор'] || !H['Период от'] || !H['Период до']) throw new Error('это не файл CustomLogs');
       if (H['Вид'] !== 'probiv') throw new Error('продолжать из файла можно только Пробив');
-      const [pf, pt] = H['Период'].split(/\s+—\s+/);
-      const from = normDT(pf), to = normDT(pt), cursor = normDT(H['Курсор']);
+      const from = normDT(H['Период от']), to = normDT(H['Период до']), cursor = normDT(H['Курсор']);
       if (!from || !to || !cursor) throw new Error('не нашла даты в файле');
-      const nick = H['Ник'] && H['Ник'] !== '—' ? H['Ник'] : '';
-      const kws = H['Ключевые слова'] && H['Ключевые слова'] !== '—' ? splitKw(H['Ключевые слова']) : [];
-      const typeLabel = H['Тип'] && H['Тип'] !== '—' ? H['Тип'] : '';
+      const nick = H['Ник пользователя'] && H['Ник пользователя'] !== '—' ? H['Ник пользователя'] : '';
+      const kws = H['Искали'] && H['Искали'] !== '—' ? splitKw(H['Искали']) : [];
+      const typeLabel = H['Тип запроса'] && H['Тип запроса'] !== '—' ? H['Тип запроса'] : '';
       const opt = typeLabel ? typeOpts.find(o => o.label === typeLabel) : null;
       if (!nick && !kws.length && !opt) throw new Error('в файле нет ника или ключевых слов');
       const title = `Пробив: ${nick || kws.join(', ') || typeLabel}`;
@@ -1933,9 +2046,8 @@
   }
 
   /* ---------- Результаты ---------- */
-  function maskText(t) { return cfg('moneyHide') ? t.replace(MONEY_TXT_RE, 'скрыто') : t; }
   function renderProbivHtml(job) {
-    return job.rows.slice(0, MAX_RENDER).map(r => rowHtml(r.t, hl(maskText(r.a)))).join('') || infoHtml('Ничего не найдено');
+    return job.rows.slice(0, MAX_RENDER).map(r => rowHtml(r.t, hl(maskText(r.a)), r.i)).join('') || infoHtml('Ничего не найдено');
   }
   function renderMechHtml(job) {
     const P = job.params;
@@ -1949,18 +2061,18 @@
     const res = perPlayer('res', P.th.res), barrels = perPlayer('barrel', P.th.barrel);
     const parts = [];
     parts.push(secHtml('Большие переводы', big.length));
-    big.forEach(r => parts.push(rowHtml(r.t, hl(maskText(r.a)))));
+    big.forEach(r => parts.push(rowHtml(r.t, hl(maskText(r.a)), r.i)));
     parts.push(secHtml('Дешёвая продажа транспорта', cheap.length));
-    cheap.forEach(r => parts.push(rowHtml(r.t, hl(maskText(r.a)))));
+    cheap.forEach(r => parts.push(rowHtml(r.t, hl(maskText(r.a)), r.i)));
     parts.push(secHtml('Много продаж ресурсов', res.length));
     res.forEach(([who, arr]) => {
       parts.push(playerHtml(who, `продаж за период: ${arr.length}`));
-      arr.forEach(r => parts.push(rowHtml(r.t, hl(maskText(r.a)))));
+      arr.forEach(r => parts.push(rowHtml(r.t, hl(maskText(r.a)), r.i)));
     });
     parts.push(secHtml('Продажи бочек', barrels.length));
     barrels.forEach(([who, arr]) => {
       parts.push(playerHtml(who, `продано бочек: ${arr.length}`));
-      arr.forEach(r => parts.push(rowHtml(r.t, hl(maskText(r.a)))));
+      arr.forEach(r => parts.push(rowHtml(r.t, hl(maskText(r.a)), r.i)));
     });
     return parts.join('');
   }
@@ -1973,66 +2085,43 @@
       <div><span>Потратил</span><b class="spend">${fmtPlain(spent)}</b></div>
       <div><span>Разница</span><b class="diff">${earned - spent >= 0 ? '+' : ''}${fmtPlain(earned - spent)}</b></div></div>`;
     const list = ops.slice(0, MAX_RENDER).map(o => rowHtml(o.t,
-      `${hl(maskText(o.a))}<span class="${o.sign === '+' ? 'plus' : 'minus'}">${o.sign === '+' ? '+' : '−'}${fmtPlain(o.amt)}</span>`)).join('');
+      `${hl(maskText(o.a))}<span class="${o.sign === '+' ? 'plus' : 'minus'}">${o.sign === '+' ? '+' : '−'}${fmtPlain(o.amt)}</span>`, o.i)).join('');
     return sum + secHtml('Операции с деньгами', ops.length) + (list || infoHtml('Операций с деньгами за период не найдено'));
   }
 
-  /* Онлайн: сессии считаются по входам и выходам, а если в строке выхода указано время сессии, берётся оно */
-  function calcOnline(job) {
-    const ev = [...job.rows].sort((x, y) => (x.t < y.t ? -1 : x.t > y.t ? 1 : 0));
-    let total = 0, lastIn = null, reports = 0;
-    for (const e of ev) {
-      if (e.ev === 'rep') { reports++; continue; }
-      if (e.ev === 'in') { lastIn = e.t; continue; }
-      if (e.dur) total += e.dur;
-      else if (lastIn) {
-        const a = parseDT(lastIn), b = parseDT(e.t);
-        if (a && b && b > a) total += (b - a) / 1000;
-      }
-      lastIn = null;
-    }
-    return { total, reports };
-  }
-  function onlineLabel(from, to) {
-    const a = parseDT(from), b = parseDT(to);
-    const days = a && b ? Math.round((b - a) / DAY_MS) : 0;
-    if (days >= 6 && days <= 8) return 'Онлайн за неделю';
-    for (let m = 1; m <= 12; m++) {
-      const d = m === 12 ? 365 : m * 30.4;
-      if (Math.abs(days - d) <= (m === 12 ? 4 : 3)) {
-        if (m === 1) return 'Онлайн за месяц';
-        if (m === 12) return 'Онлайн за год';
-        return `Онлайн за ${m} ${plural(m, ['месяц', 'месяца', 'месяцев'])}`;
-      }
-    }
-    return 'Онлайн';
-  }
-  function renderOnlineHtml(jobs) {
-    return jobs.map(j => {
-      const c = calcOnline(j);
-      return playerHtml(j.params.nick, j.done ? '' : 'не завершено') +
-        `<div class="onl"><div><span>Репорт -</span>${c.reports}</div><div><span>${esc(onlineLabel(j.from, j.to))} -</span>${esc(fmtDur(c.total))}</div></div>`;
-    }).join('') || infoHtml('Нет данных');
+  function updSelBtn() {
+    const b = q('#cl-wsel');
+    if (!b) return;
+    b.textContent = `Скачать выбранное (${selSet.size})`;
+    b.disabled = !selSet.size;
   }
   function showWin(title, html, job) {
     shownJob = job || null;
-    const w = q('#cl-win');
+    selSet = new Set();
     q('#cl-wtitle').textContent = title;
-    q('.cl-wbody', w).innerHTML = html;
-    q('#cl-wtxt').style.display = job && cfg('allowDl') ? '' : 'none';
-    w.classList.add('open');
+    q('#cl-win .cl-wbody').innerHTML = html;
+    q('#cl-winbtns').style.display = job && cfg('allowDl') ? '' : 'none';
+    q('#cl-wselall').textContent = 'Выбрать всё';
+    updSelBtn();
+    q('#cl-win').classList.add('open');
   }
   function showJob(job) {
+    job.rows.forEach((r, i) => { r.i = i; });
     const title = job.title + (job.done ? '' : ' (не завершено)');
-    const html = job.kind === 'probiv' ? renderProbivHtml(job)
+    const found = `<div class="found">Найдено строк: ${job.rows.length}<span>просмотрено строк: ${job.scanned || 0}</span></div>`;
+    const body = job.kind === 'probiv' ? renderProbivHtml(job)
       : job.kind === 'mech' ? (renderMechHtml(job) || infoHtml('Подозрительных действий не найдено'))
-        : job.kind === 'online' ? renderOnlineHtml([job])
-          : renderVirtHtml(job);
-    showWin(title, html, job);
+        : renderVirtHtml(job);
+    showWin(title, found + body, job);
+  }
+  function downloadShown(rows, tag) {
+    if (!shownJob) return;
+    const status = shownJob.done ? 'готово' : 'остановлено';
+    download(`CustomLogs_${shownJob.kind}_${fileDate(shownJob.created)}${tag}.txt`, jobTxt(shownJob, status, rows));
   }
 
   /* =========================================================
-     ФИЛЬТРЫ: Пробив, Махинатор, Вирты, Онлайн
+     ФИЛЬТРЫ (в разделе «Поиск»): Пробив, Махинатор, Вирты
      ========================================================= */
   function setPMode(m) {
     pMode = m;
@@ -2099,33 +2188,6 @@
     runJob(makeJob('virt', 'Вирты: ' + nick, { nick }, from, to));
   }
 
-  /* Онлайн: можно указать нескольких через запятую, они идут по порядку */
-  async function startOnline() {
-    if (!gateOk('online') || isBusy()) return;
-    const nicks = q('#cl-o-nick').value.split(',').map(s => s.trim()).filter(Boolean);
-    if (!nicks.length) return msgFor('online', 'Укажи ник игрока или администратора');
-    const from = normDT(q('#cl-o-from').value), to = normDT(q('#cl-o-to').value);
-    if (!from || !to) return msgFor('online', 'Дата в формате 2026-10-11 14:30:00');
-    if (from >= to) return msgFor('online', 'Период от должен быть раньше периода до');
-    chain = true;
-    const jobs = [];
-    try {
-      for (const nick of nicks) {
-        const job = makeJob('online', 'Онлайн: ' + nick, { nick, kws: [] }, from, to);
-        job.noSay = true;
-        await runJob(job);
-        if (job.failed) { chain = false; renderResumeBtns(); return; }
-        jobs.push(job);
-        if (!job.done) break;
-      }
-    } finally { chain = false; }
-    renderResumeBtns();
-    if (jobs.length) {
-      showWin('Онлайн', renderOnlineHtml(jobs), jobs.length === 1 ? jobs[0] : null);
-      if (jobs.every(j => j.done)) announceDone();
-    }
-  }
-
   function saveMechThresholds() {
     const num = id => Number(q(id).value.replace(/[ ,]/g, '')) || 0;
     setCfg('mech', { big: num('#cl-th-big'), cheap: num('#cl-th-cheap'), res: num('#cl-th-res'), barrel: num('#cl-th-barrel') });
@@ -2136,9 +2198,10 @@
     qa('.f-view').forEach(v => v.classList.remove('act'));
     q(kind ? '#f-' + kind : '#f-menu').classList.add('act');
   }
+  /* Настройки: kind = null (меню), 'logs', 'script', 'l-ui', 'l-priv', 'l-set', 's-cust', 's-mode', 's-anim' */
   function showTech(kind) {
     qa('.t-view').forEach(v => v.classList.remove('act'));
-    q(kind ? '#t-' + kind : '#t-menu').classList.add('act');
+    q('#t-' + (kind || 'menu')).classList.add('act');
   }
 
   /* ---------- Вкладки и панели ---------- */
@@ -2156,6 +2219,7 @@
       placePanel();
       doneBadge = false;
       refreshBadge();
+      touchSeen();
     }
     panel.classList.toggle('open', open);
     if (open && updState().blocked) activateTab('update', true);
@@ -2167,6 +2231,7 @@
     if (name === 'filters') showFilter(null);
     if (name === 'settings') showTech(null);
     if (name === 'logs') renderLogs();
+    if (name === 'home') renderHomeStars();
   }
   // Переключение вкладок с плавным затуханием предыдущей
   function activateTab(name, instant) {
@@ -2202,14 +2267,12 @@
      ========================================================= */
   function buildUI() {
     const serverOpts = SERVERS.map(([n, name]) => `<option value="${n}">[${n}] ${name}</option>`).join('');
-    const posOpts = POSITIONS.map(p => `<option value="${p}"${p === 'Администратор' ? ' selected' : ''}>${p}</option>`).join('');
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const fromVal = fmtSite(startOfDay), toVal = fmtSite(now);
     const limitRadios = LIMITS.map(n => `<label><input type="radio" name="cl-lim" value="${n}"><span>${n}</span></label>`).join('');
     const perRadios = PER_OPTIONS.map(n => `<label><input type="radio" name="cl-per" value="${n}"><span>${n}</span></label>`).join('');
-    const cdRadios = CD_OPTIONS.map(n => `<label><input type="radio" name="cl-cd" value="${n}"><span>${n}</span></label>`).join('');
-    const bannerRadios = [['', 'Стоковый'], ['black', 'Чёрный'], ['white', 'Белый']].map(([v, n]) =>
+    const bannerRadios = [['', 'Стоковый'], ['custom', 'Кастомный'], ['black', 'Чёрный']].map(([v, n]) =>
       `<label><input type="radio" class="cl-banner-r" name="cl-banner" value="${v}"><span>${n}</span></label>`).join('');
     const fxChips = FX_TYPES.map(([v, n, e]) =>
       `<label><input type="radio" name="cl-fxt" value="${v}">${e ? e + ' ' : ''}${n}</label>`).join('');
@@ -2217,6 +2280,7 @@
     const charCards = CHARS.map(c =>
       `<label><input type="radio" name="cl-char" value="${c.id}"><img src="${charImg(c)}" alt=""><span>${c.name}</span></label>`).join('');
     const roleOpts = TEST_ROLES.map(r => `<option value="${r}">${r}</option>`).join('');
+    const devPosOpts = POSITIONS.map(p => `<option value="${p}">${p}</option>`).join('');
     const mech = cfg('mech');
     const typeOptsHtml = typeOpts.map(o => `<option value="${esc(o.label)}"></option>`).join('');
     const themeSec = key => `
@@ -2226,7 +2290,7 @@
         <label class="cl-sw"><span>Градиент</span><input type="checkbox" class="th-grad" data-key="${key}"></label>
         <div class="th-rows"></div>
       </div>`;
-    const mechIco = MECH_IMG ? `<img src="${MECH_IMG}" alt="">` : '⛓️';
+    const mechIco = MECH_IMG ? `<img src="${MECH_IMG}" alt="">` : ICON.chain;
 
     ui.innerHTML = `
       <style>${CSS}</style>
@@ -2241,6 +2305,7 @@
           <div class="cl-warn-ico">!</div>
           <h3>Предупреждение</h3>
           <p>${WARN_TEXT}</p>
+          <div class="cl-upbar"><i id="cl-warn-i" style="animation-duration:${WARN_MS}ms"></i></div>
           <button class="cl-btnp" id="cl-warn-ok">Понятно</button>
         </div>
       </div>
@@ -2251,30 +2316,32 @@
           <span class="cl-upglobal" id="cl-upglobal">Глобальное обновление</span>
           <div class="cl-upbody" id="cl-upbody"></div>
           <div class="cl-upend">${WELCOME_TXT}</div>
-          <div class="cl-upbar"><i style="animation-duration:${POPUP_MS}ms"></i></div>
+          <div class="cl-upbar"><i id="cl-upbar-i"></i></div>
           <button class="cl-btnp small sec" id="cl-upclose">Закрыть</button>
         </div>
       </div>
 
+      <div id="cl-del"><div class="cl-box center" id="cl-del-box"></div></div>
+
       <div id="cl-panel">
         <div id="cl-fx"></div>
         <div class="cl-head">
-          <div class="cl-title"><b>CustomLogs</b><span>Rodina RP</span><em class="cl-beta">BETA</em>
+          <div class="cl-title"><b>CustomLogs</b><span>Rodina RP</span><em class="cl-beta">BETA</em><span class="cl-homever">${VERSION}</span>
             <span class="cl-test" id="cl-test"><span id="cl-test-name"></span><button id="cl-test-exit">Выйти</button></span></div>
           <span class="cl-x" title="Закрыть">✕</span>
         </div>
         <div class="cl-main">
           <div class="cl-nav">
             <div class="cl-tab act" data-tab="home">${ICON.home}<span>Главная</span></div>
-            <div class="cl-tab" data-tab="settings">${ICON.gear}<span>Техничка</span></div>
-            <div class="cl-tab" data-tab="filters">${ICON.search}<span>Фильтры</span></div>
-            <div class="cl-tab" data-tab="logs">${ICON.logs}<span>Логи</span></div>
+            <div class="cl-tab" data-tab="settings">${ICON.gear}<span>Настройки</span></div>
+            <div class="cl-tab" data-tab="filters">${ICON.search}<span>Поиск</span></div>
+            <div class="cl-tab" data-tab="logs">${ICON.logs}<span>Лог Проверки</span></div>
             <div class="cl-tab lock" data-tab="ivent">${ICON.spark}<span>Ивенты</span></div>
             <div class="cl-tab" data-tab="offer">${ICON.chat}<span>Предложения</span></div>
-            <div class="cl-tab" data-tab="update">${ICON.info}<span>Обновления</span></div>
-            <div class="cl-tab" data-tab="dev">${ICON.dev}<span>Разработчик</span></div>
+            <div class="cl-tab" data-tab="update">${ICON.info}<span>О скрипте</span></div>
+            <div class="cl-tab" data-tab="dev">${ICON.dev}<span>Для Разработчика</span></div>
             <div class="cl-navend"></div>
-            <div class="cl-profbtn" id="cl-profbtn" title="Профиль"><span id="cl-profbtn-av"></span><span id="cl-profbtn-nick"></span></div>
+            <div class="cl-profbtn" id="cl-profbtn" title="Профиль"><span id="cl-profbtn-av"></span></div>
           </div>
           <div class="cl-body">
 
@@ -2290,7 +2357,7 @@
                   <label class="cl-lbl">Сервер</label>
                   <select class="cl-in" id="cl-a-server">${serverOpts}</select>
                   <label class="cl-lbl">Должность (выбирается при регистрации)</label>
-                  <select class="cl-in" id="cl-a-pos">${posOpts}</select>
+                  <select class="cl-in" id="cl-a-pos">${SELF_POSITIONS.map(p => `<option${p === 'Администратор' ? ' selected' : ''}>${p}</option>`).join('')}</select>
                 </div>
                 <button class="cl-btnp" id="cl-a-login">Войти</button>
                 <button class="cl-btnp sec" id="cl-a-reg">Создать аккаунт</button>
@@ -2299,7 +2366,7 @@
             </div>
 
             <div class="cl-pane act cl-home" data-pane="home">
-              <div class="cl-homever">${VERSION}</div>
+              <div class="cl-stars" id="cl-stars"></div>
               <div class="cl-hero">
                 <h2>Добро пожаловать в <em>Custom Logs!</em></h2>
                 <p>Продуктивного проживания в логах Проекта Rodina RolePlay</p>
@@ -2310,13 +2377,12 @@
 
             <div class="cl-pane" data-pane="profile">
               <div class="cl-profcard">
-                <div class="cl-cover" id="cl-cover">
-                  <button class="cl-gear" id="cl-goacc">${ICON.gear}<span>Настройка</span></button>
-                </div>
+                <div class="cl-cover" id="cl-cover"></div>
+                <button class="cl-gear" id="cl-goacc">${ICON.gear}<span>Настройка</span></button>
                 <div class="cl-cbody">
                   <div class="cl-prow">
                     <div id="cl-av"></div>
-                    <div class="cl-pinfo"><div class="cl-nickrow"><span class="cl-nick" id="cl-pnick">Гость</span><span id="cl-badges"></span></div></div>
+                    <div class="cl-pinfo"><div class="cl-nick" id="cl-pnick">Гость</div><div id="cl-badges"></div></div>
                   </div>
                   <div class="cl-conn" id="cl-conn"></div>
                   <div class="cl-flamewrap">
@@ -2377,8 +2443,8 @@
                   <div class="cl-msg" id="cl-ct-msg"></div>
                 </div>
               </div>
-              <div class="cl-grid2" style="margin-top:14px">
-                <div class="cl-card" style="margin-top:0">
+              <div class="cl-grid2">
+                <div class="cl-card" style="margin-top:14px">
                   <div class="cl-sec">Ник и сервер</div>
                   <label class="cl-lbl">Новый ник</label>
                   <input class="cl-in" id="cl-acc-nick">
@@ -2389,12 +2455,12 @@
                   <select class="cl-in" id="cl-acc-server">${serverOpts}</select>
                   <button class="cl-btnp small" id="cl-acc-servergo" style="margin-top:10px">Сохранить сервер</button>
                   <div class="cl-msg" id="cl-acc-msg1"></div>
-                  <label class="cl-lbl">Должность</label>
+                  <label class="cl-lbl">Моя роль (максимум — Куратор)</label>
                   <select class="cl-in" id="cl-acc-pos"></select>
-                  <button class="cl-btnp small" id="cl-acc-posgo" style="margin-top:10px">Сохранить должность</button>
+                  <button class="cl-btnp small" id="cl-acc-posgo" style="margin-top:10px">Сохранить роль</button>
                   <div class="cl-msg" id="cl-acc-msg3"></div>
                 </div>
-                <div class="cl-card" style="margin-top:0">
+                <div class="cl-card" style="margin-top:14px">
                   <div class="cl-sec">Пароль</div>
                   <label class="cl-lbl">Старый пароль</label>
                   <input class="cl-in" id="cl-acc-oldp" type="password">
@@ -2404,7 +2470,8 @@
                   <div class="cl-msg" id="cl-acc-msg2"></div>
                 </div>
               </div>
-              <button class="cl-btnp sec danger" id="cl-logout">Выйти из аккаунта</button>
+              <button class="cl-btnp sec danger" id="cl-logout" style="margin-top:14px">Выйти из аккаунта</button>
+              <button class="cl-btnp sec danger" id="cl-delacc">Удалить аккаунт</button>
             </div>
 
             <div class="cl-pane cl-col" data-pane="settings">
@@ -2416,13 +2483,23 @@
               </div>
 
               <div id="t-logs" class="t-view">
-                <div class="cl-top"><button class="cl-btnp small sec" data-tback>← Назад</button><div class="cl-title-sm">Настройки логов</div></div>
+                <div class="cl-top"><button class="cl-btnp small sec" data-tback="">← Назад</button><div class="cl-title-sm">Настройки логов</div></div>
+                <div class="tcards">
+                  <div class="tcard" data-t="l-ui">${ICON.eye}<b>Интерфейс</b></div>
+                  <div class="tcard" data-t="l-priv">${ICON.sliders}<b>Приватность</b></div>
+                  <div class="tcard" data-t="l-set">${ICON.gear}<b>Настройка</b></div>
+                </div>
+                <button class="cl-btnp sec danger" id="cl-reset-logs" style="margin-top:18px">Сбросить все настройки логов</button>
+                <div class="cl-msg" id="cl-reset-logs-msg"></div>
+              </div>
 
+              <div id="t-l-ui" class="t-view">
+                <div class="cl-top"><button class="cl-btnp small sec" data-tback="logs">← Назад</button><div class="cl-title-sm">Интерфейс логов</div></div>
                 <div class="cl-card" style="margin-top:0">
                   <div class="cl-sec">Фон логов</div>
                   <div class="cl-seg">${bannerRadios}</div>
                   <div class="cl-urlrow">
-                    <input class="cl-in" id="cl-bg-in" placeholder="Вставь ссылку или картинку (Ctrl+V)" autocomplete="off">
+                    <input class="cl-in" id="cl-bg-in" placeholder="Вставь ссылку на картинку или gif" autocomplete="off">
                     <button class="cl-btnp sec" id="cl-bg-pick">Файл</button>
                   </div>
                   <input type="file" id="cl-bg-file" accept="image/*" hidden>
@@ -2433,41 +2510,55 @@
                   <div class="cl-sec" style="margin-top:6px">Блюр картинки: <span id="cl-blurv">0</span> px</div>
                   <input class="cl-range" type="range" id="cl-blur" min="0" max="20" value="0">
                 </div>
+              </div>
 
-                <div class="cl-card">
-                  <div class="cl-sec">Запросы</div>
-                  <div class="cl-seg">${perRadios}</div>
-                  <div class="cl-cap">Кол-во проверяемых строк за 5-10 секунд</div>
-                  <div class="cl-sec" style="margin-top:12px">КД</div>
-                  <div class="cl-seg">${cdRadios}</div>
-                </div>
-
-                <div class="cl-card">
-                  <div class="cl-sec">Приватность</div>
+              <div id="t-l-priv" class="t-view">
+                <div class="cl-top"><button class="cl-btnp small sec" data-tback="logs">← Назад</button><div class="cl-title-sm">Приватность</div></div>
+                <div class="cl-card" style="margin-top:0">
                   <label class="cl-sw"><span>Скрытие IP Адресов</span><input type="checkbox" id="cl-ipb"></label>
                   <label class="cl-sw"><span>Скрытие Денежных Средств</span><input type="checkbox" id="cl-moneyb"></label>
+                  <label class="cl-sw"><span>Скрытие Даты</span><input type="checkbox" id="cl-dateb"></label>
                 </div>
+              </div>
 
+              <div id="t-l-set" class="t-view">
+                <div class="cl-top"><button class="cl-btnp small sec" data-tback="logs">← Назад</button><div class="cl-title-sm">Настройка логов</div></div>
+                <div class="cl-card" style="margin-top:0">
+                  <div class="cl-sec">Запросы</div>
+                  <div class="cl-seg">${perRadios}</div>
+                  <div class="cl-cap">Сколько строк проверяется за одну пачку</div>
+                  <div class="cl-sec" style="margin-top:12px">КД, сек</div>
+                  <div class="cl-urlrow">
+                    <input class="cl-in" id="cl-cd-in" type="number" min="${CD_MIN}" max="${CD_MAX}" step="0.5">
+                  </div>
+                  <div class="cl-hint2">По умолчанию ${CD_DEF} сек. Можно поставить меньше, но тогда выше риск ограничения со стороны сайта.</div>
+                </div>
                 <div class="cl-card">
-                  <div class="cl-sec">Кол-во строк на одной странице</div>
+                  <div class="cl-sec">Кол-во строк на странице</div>
                   <div class="cl-seg">${limitRadios}</div>
                   <label class="cl-sw"><span>Автоматически выставлять это значение</span><input type="checkbox" id="cl-limon"></label>
                 </div>
-
                 <div class="cl-card">
-                  <div class="cl-sec">Файлы проверок</div>
-                  <label class="cl-sw"><span>Скачивание файлов проверок</span><input type="checkbox" id="cl-allowdl"></label>
-                  <label class="cl-sw"><span>Сохранять во вкладку «Логи»</span><input type="checkbox" id="cl-savelogs"></label>
-                  <label class="cl-sw"><span>Скачивать файл по окончании проверки</span><input type="checkbox" id="cl-savefile"></label>
+                  <div class="cl-sec">Логирование</div>
+                  <label class="cl-sw"><span>Сохранение всех файлов</span><input type="checkbox" id="cl-allowdl"></label>
+                  <label class="cl-sw"><span>Сохранение в лог проверки</span><input type="checkbox" id="cl-savelogs"></label>
+                  <label class="cl-sw"><span>Сохранение на ПК</span><input type="checkbox" id="cl-savefile"></label>
                 </div>
-
-                <button class="cl-btnp sec danger" id="cl-reset-logs">Сбросить настройки</button>
-                <div class="cl-msg" id="cl-reset-logs-msg"></div>
               </div>
 
               <div id="t-script" class="t-view">
-                <div class="cl-top"><button class="cl-btnp small sec" data-tback>← Назад</button><div class="cl-title-sm">Настройки скрипта</div></div>
+                <div class="cl-top"><button class="cl-btnp small sec" data-tback="">← Назад</button><div class="cl-title-sm">Настройки скрипта</div></div>
+                <div class="tcards">
+                  <div class="tcard" data-t="s-cust">${ICON.brush}<b>Кастомизация</b></div>
+                  <div class="tcard" data-t="s-mode">${ICON.wand}<b>Режим</b></div>
+                  <div class="tcard" data-t="s-anim">${ICON.film}<b>Анимация</b></div>
+                </div>
+                <button class="cl-btnp sec danger" id="cl-reset-script" style="margin-top:18px">Сбросить настройки скрипта</button>
+                <div class="cl-msg" id="cl-reset-script-msg"></div>
+              </div>
 
+              <div id="t-s-cust" class="t-view">
+                <div class="cl-top"><button class="cl-btnp small sec" data-tback="script">← Назад</button><div class="cl-title-sm">Кастомизация</div></div>
                 <div class="cl-card" style="margin-top:0">
                   <div class="cl-secrow"><div class="cl-sec" style="margin:0">Вид меню</div>
                     <button class="cl-btnp small sec" id="cl-stock">Стоковый вид</button></div>
@@ -2476,8 +2567,27 @@
                 ${themeSec('accent')}
                 ${themeSec('panel')}
                 ${themeSec('hover')}
-
                 <div class="th-sec">
+                  <div class="cl-secrow"><div class="cl-sec" style="margin:0">Размер меню</div>
+                    <button class="cl-btnp small sec" id="cl-size-reset">Сбросить размер</button></div>
+                  <div class="cl-hint2" style="margin-top:0">Потяни меню за правый нижний угол, чтобы растянуть. Размер сохранится навсегда.</div>
+                </div>
+              </div>
+
+              <div id="t-s-mode" class="t-view">
+                <div class="cl-top"><button class="cl-btnp small sec" data-tback="script">← Назад</button><div class="cl-title-sm">Режим</div></div>
+                <div class="th-sec" style="margin-top:0">
+                  <div class="cl-sec">Иконка запуска меню скрипта</div>
+                  <div class="chars">${charCards}</div>
+                  <label class="cl-sw"><span>Оформление скрипта под персонажа</span><input type="checkbox" id="cl-chartheme"></label>
+                  <div class="cl-lbl">Размер модельки: <span id="cl-scalev">100</span>%</div>
+                  <input class="cl-range" type="range" id="cl-scale" min="40" max="150" value="100">
+                </div>
+              </div>
+
+              <div id="t-s-anim" class="t-view">
+                <div class="cl-top"><button class="cl-btnp small sec" data-tback="script">← Назад</button><div class="cl-title-sm">Анимация</div></div>
+                <div class="th-sec" style="margin-top:0">
                   <div class="cl-sec">Анимация меню</div>
                   <div class="fx-chips">${fxChips}</div>
                   <label class="cl-lbl">Цвет анимации</label>
@@ -2492,24 +2602,9 @@
                       <input class="cl-range" type="range" id="cl-fx-speed" min="4" max="20" value="10">
                     </div>
                   </div>
+                  <div class="cl-lbl">Размер анимации: <span id="cl-fx-sizev">100</span>%</div>
+                  <input class="cl-range" type="range" id="cl-fx-size" min="50" max="200" value="100">
                 </div>
-
-                <div class="th-sec">
-                  <div class="cl-sec">Иконка запуска меню скрипта</div>
-                  <div class="chars">${charCards}</div>
-                  <label class="cl-sw"><span>Оформление скрипта под персонажа</span><input type="checkbox" id="cl-chartheme"></label>
-                  <div class="cl-lbl">Размер модельки: <span id="cl-scalev">100</span>%</div>
-                  <input class="cl-range" type="range" id="cl-scale" min="40" max="150" value="100">
-                </div>
-
-                <div class="th-sec">
-                  <div class="cl-secrow"><div class="cl-sec" style="margin:0">Размер меню</div>
-                    <button class="cl-btnp small sec" id="cl-size-reset">Сбросить размер</button></div>
-                  <div class="cl-hint2" style="margin-top:0">Потяни меню за правый нижний угол, чтобы растянуть. Размер сохранится навсегда.</div>
-                </div>
-
-                <button class="cl-btnp sec danger" id="cl-reset-script">Сбросить настройки</button>
-                <div class="cl-msg" id="cl-reset-script-msg"></div>
               </div>
             </div>
 
@@ -2519,12 +2614,11 @@
                   <div class="fcard" data-f="probiv"><div class="fico">${ICON.search}</div><b>Пробив</b></div>
                   <div class="fcard" data-f="mech"><div class="fico">${mechIco}</div><b>Махинатор</b></div>
                   <div class="fcard" data-f="virt"><div class="fico">${ICON.dollar}</div><b>Вирты</b></div>
-                  <div class="fcard" data-f="online"><div class="fico">${ICON.clock}</div><b>Онлайн</b></div>
                 </div>
               </div>
 
               <div id="f-probiv" class="f-view">
-                <div class="cl-top"><button class="cl-btnp small sec" data-back>← Фильтры</button><div class="cl-title-sm">Пробив</div></div>
+                <div class="cl-top"><button class="cl-btnp small sec" data-back>← Поиск</button><div class="cl-title-sm">Пробив</div></div>
                 <div class="cl-modes">
                   <div class="cl-mode act" data-mode="nick">Ник</div>
                   <div class="cl-mode" data-mode="kw">Ключевые слова</div>
@@ -2551,22 +2645,15 @@
                   <button class="cl-btnp" id="cl-p-go">Искать</button>
                   <button class="cl-btnp sec cl-stop" data-kind="probiv">Стоп</button>
                   <button class="cl-btnp sec cl-res" data-kind="probiv">Продолжить</button>
+                  <button class="cl-btnp sec" id="cl-pf-btn" title="Загрузи файл проверки, и поиск продолжится с того же места">Продолжить из файла</button>
                 </div>
+                <input type="file" id="cl-pf-file" accept=".txt,text/plain" hidden>
                 <div class="cl-msg" id="cl-msg-p"></div>
-                <div class="cl-card">
-                  <div class="cl-sec">Продолжить из файла</div>
-                  <div class="cl-hint2" style="margin-top:0">Если поиск был остановлен/поврежден, файл проверки скачается на ваш ПК и вы сможете продолжить поиск с того же места, где остановились</div>
-                  <div class="cl-drop" id="cl-pf-zone" tabindex="0">
-                    <div class="cl-drop-ico">⬆</div>
-                    <div><b>Выберите файл</b></div>
-                  </div>
-                  <input type="file" id="cl-pf-file" accept=".txt,text/plain" hidden>
-                  <div class="cl-hint2" id="cl-pf-info"></div>
-                </div>
+                <div class="cl-hint2" id="cl-pf-info" style="text-align:center"></div>
               </div>
 
               <div id="f-mech" class="f-view">
-                <div class="cl-top"><button class="cl-btnp small sec" data-back>← Фильтры</button><div class="cl-title-sm">Махинатор</div></div>
+                <div class="cl-top"><button class="cl-btnp small sec" data-back>← Поиск</button><div class="cl-title-sm">Махинатор</div></div>
                 <div class="cl-grid">
                   <div class="cl-card" style="margin-top:0">
                     <label class="cl-lbl">Ник игрока</label>
@@ -2604,7 +2691,7 @@
               </div>
 
               <div id="f-virt" class="f-view">
-                <div class="cl-top"><button class="cl-btnp small sec" data-back>← Фильтры</button><div class="cl-title-sm">Вирты</div></div>
+                <div class="cl-top"><button class="cl-btnp small sec" data-back>← Поиск</button><div class="cl-title-sm">Вирты</div></div>
                 <div class="cl-card" style="margin-top:0">
                   <label class="cl-lbl">Ник игрока</label>
                   <input class="cl-in" id="cl-v-nick">
@@ -2620,27 +2707,10 @@
                 </div>
                 <div class="cl-msg" id="cl-msg-v"></div>
               </div>
-
-              <div id="f-online" class="f-view">
-                <div class="cl-top"><button class="cl-btnp small sec" data-back>← Фильтры</button><div class="cl-title-sm">Онлайн</div></div>
-                <div class="cl-card" style="margin-top:0">
-                  <label class="cl-lbl">Ник игрока (несколько — через запятую)</label>
-                  <input class="cl-in" id="cl-o-nick" autocomplete="off">
-                  <label class="cl-lbl">Период от</label>
-                  <input class="cl-in" id="cl-o-from" value="${fromVal}" autocomplete="off">
-                  <label class="cl-lbl">Период до</label>
-                  <input class="cl-in" id="cl-o-to" value="${toVal}" autocomplete="off">
-                </div>
-                <div class="cl-center">
-                  <button class="cl-btnp" id="cl-o-go">Посчитать</button>
-                  <button class="cl-btnp sec cl-stop" data-kind="online">Стоп</button>
-                </div>
-                <div class="cl-msg" id="cl-msg-o"></div>
-              </div>
             </div>
 
             <div class="cl-pane" data-pane="logs">
-              <div class="cl-top"><div class="cl-title-sm">Логи</div></div>
+              <div class="cl-top"><div class="cl-title-sm">Лог Проверки</div></div>
               <div id="cl-logs"></div>
             </div>
 
@@ -2655,7 +2725,6 @@
                 <li>Баг с скриптом?</li>
                 <li>Нашли недоработку или обход систем?</li>
                 <li>Хотите предложить улучшение?</li>
-                <li>Хотите стать тестером?</li>
               </ul>
               <div class="cl-card">
                 <div class="cl-sec">Если вы нашли свою причину, то обратитесь сюда:</div>
@@ -2668,12 +2737,11 @@
 
             <div class="cl-pane" data-pane="update">
               <div class="cl-card" style="margin-top:0">
-                <div class="cl-sec">Версия скрипта</div>
                 <div class="cl-verbig">v${VERSION_NUM}</div>
                 <div class="upd-line" id="cl-upd-remote">Доступная версия: проверяю…</div>
                 <div class="cl-row">
                   <button class="cl-btnp small" id="cl-upd-check">Проверить обновления</button>
-                  <button class="cl-btnp small sec" id="cl-upd-dl">Обновить</button>
+                  <button class="cl-btnp small sec" id="cl-upd-dl">Скачать</button>
                 </div>
                 <div class="cl-msg" id="cl-upd-msg"></div>
               </div>
@@ -2686,7 +2754,7 @@
             </div>
 
             <div class="cl-pane" data-pane="dev">
-              <div class="cl-top"><div class="cl-title-sm">Разработчик</div></div>
+              <div class="cl-top"><div class="cl-title-sm">Для Разработчика</div></div>
               <div class="cl-card" style="margin-top:0">
                 <div class="cl-sec">Тестовый режим</div>
                 <div class="cl-hint2" style="margin-top:0">Выдай себе любую роль и посмотри, что ей открывается. Выйти можно кнопкой здесь или в шапке меню.</div>
@@ -2698,6 +2766,15 @@
                 </div>
                 <div class="cl-msg" id="cl-dev-cur"></div>
               </div>
+              <div class="cl-card">
+                <div class="cl-sec">Выдать роль пользователю</div>
+                <label class="cl-lbl">Пользователь</label>
+                <select class="cl-in" id="cl-dev-user"></select>
+                <label class="cl-lbl">Должность</label>
+                <select class="cl-in" id="cl-dev-pos">${devPosOpts}</select>
+                <button class="cl-btnp small" id="cl-dev-give" style="margin-top:10px">Выдать</button>
+                <div class="cl-msg" id="cl-dev-msg"></div>
+              </div>
             </div>
 
           </div>
@@ -2706,10 +2783,13 @@
       </div>
 
       <div id="cl-win">
+        <div id="cl-wfx"></div>
         <div class="cl-head" id="cl-whead">
           <div class="cl-title"><b id="cl-wtitle"></b></div>
-          <div class="cl-whead-btns">
-            <button class="cl-btnp small sec cl-dl" id="cl-wtxt">Скачать TXT</button>
+          <div class="cl-whead-btns" id="cl-winbtns">
+            <button class="cl-btnp small sec" id="cl-wselall">Выбрать всё</button>
+            <button class="cl-btnp small sec" id="cl-wsel" disabled>Скачать выбранное (0)</button>
+            <button class="cl-btnp small sec" id="cl-wall">Скачать всё</button>
             <span class="cl-x" id="cl-wclose">✕</span>
           </div>
         </div>
@@ -2725,22 +2805,29 @@
     q('#cl-profbtn').onclick = () => activateTab('profile');
     q('.cl-head .cl-x').onclick = () => togglePanel(false);
     q('#cl-wclose').onclick = () => q('#cl-win').classList.remove('open');
-    q('#cl-warn-ok').onclick = () => {
+    const closeWarn = () => {
       q('#cl-warn').classList.remove('open');
       if (pending) { const f = pending; pending = null; f(); }
     };
+    q('#cl-warn-ok').onclick = closeWarn;
     document.addEventListener('keydown', e => { if (e.key === 'Escape') togglePanel(false); });
     qa('.tcard').forEach(c => c.onclick = () => showTech(c.dataset.t));
-    qa('[data-tback]').forEach(b => b.onclick = () => showTech(null));
+    qa('[data-tback]').forEach(b => b.onclick = () => showTech(b.dataset.tback || null));
     qa('.fcard').forEach(c => c.onclick = () => showFilter(c.dataset.f));
     qa('[data-back]').forEach(b => b.onclick = () => showFilter(null));
     qa('.cl-mode[data-mode]').forEach(m => m.onclick = () => setPMode(m.dataset.mode));
     setPMode(pMode);
 
+    /* Предупреждение о безопасности: закрывается само через WARN_MS */
+    q('#cl-warn').dataset.close = '1';
+    setTimeout(() => { q('#cl-warn').classList.add('open'); setTimeout(closeWarn, WARN_MS); }, 0);
+    window.__clCloseWarn = closeWarn;
+
     /* Все окна перемещаются */
     makeDrag(q('#cl-win'), q('#cl-whead'));
     makeDrag(q('#cl-upbox'), q('#cl-upbox'));
     makeDrag(q('#cl-warn-box'), q('#cl-warn-box'));
+    makeDrag(q('#cl-del-box'), q('#cl-del-box'));
 
     /* Меню: перетаскивание за шапку */
     const head = q('.cl-head');
@@ -2864,13 +2951,13 @@
       if (mode === 'register') {
         if (accs[key]) return authMsg('Такой ник уже зарегистрирован, нажми «Войти»');
         const salt = newSalt();
-        accs[key] = { nick, salt, hash: await hashPass(pass, salt), server, position: q('#cl-a-pos').value, vk: '', tg: '' };
+        accs[key] = { nick, salt, hash: await hashPass(pass, salt), server, position: q('#cl-a-pos').value, vk: '', tg: '', seen: Date.now() };
         setCfg('accounts', accs);
       } else {
         const a = accs[key];
         if (!a) return authMsg('Аккаунт не найден, нажми «Создать аккаунт»');
         if ((await hashPass(pass, a.salt)) !== a.hash) return authMsg('Неверный пароль');
-        saveAcc(key, { server });
+        saveAcc(key, { server, seen: Date.now() });
       }
       setCfg('session', key);
       q('#cl-a-pass').value = '';
@@ -2892,7 +2979,6 @@
     q('#cl-p-go').onclick = startProbiv;
     q('#cl-m-go').onclick = startMech;
     q('#cl-v-go').onclick = startVirt;
-    q('#cl-o-go').onclick = startOnline;
     q('#cl-th-save').onclick = saveMechThresholds;
     qa('.cl-stop').forEach(b => b.onclick = () => {
       if (!isBusy() || curKind !== b.dataset.kind) return;
@@ -2902,31 +2988,38 @@
       setMsg('Останавливаю на текущей пачке…');
     });
     qa('.cl-res').forEach(b => b.onclick = () => { if (b.dataset.id) resumeJob(b.dataset.id); });
-    const pfZone = q('#cl-pf-zone'), pfFile = q('#cl-pf-file');
-    pfZone.addEventListener('click', () => pfFile.click());
-    pfZone.addEventListener('keydown', e => { if (e.key === 'Enter') pfFile.click(); });
+    const pfBtn = q('#cl-pf-btn'), pfFile = q('#cl-pf-file');
+    pfBtn.addEventListener('click', () => pfFile.click());
     pfFile.addEventListener('change', () => { if (pfFile.files[0]) loadResumeFile(pfFile.files[0]); pfFile.value = ''; });
-    pfZone.addEventListener('dragover', e => { e.preventDefault(); pfZone.classList.add('drag'); });
-    pfZone.addEventListener('dragleave', () => pfZone.classList.remove('drag'));
-    pfZone.addEventListener('drop', e => {
-      e.preventDefault();
-      pfZone.classList.remove('drag');
-      const f = e.dataTransfer && e.dataTransfer.files[0];
-      if (f) loadResumeFile(f);
-    });
-    q('#cl-wtxt').onclick = () => {
-      if (!shownJob) return;
-      download(`CustomLogs_${shownJob.kind}_${fileDate(shownJob.created)}.txt`, jobTxt(shownJob, shownJob.done ? 'готово' : 'остановлено'));
-    };
 
-    /* Вкладка «Логи» */
+    /* Окно результата: выбор строк и скачивание */
+    q('#cl-win .cl-wbody').addEventListener('click', e => {
+      const row = e.target.closest('.r[data-i]');
+      if (!row) return;
+      const i = +row.dataset.i;
+      if (selSet.has(i)) selSet.delete(i); else selSet.add(i);
+      row.classList.toggle('sel', selSet.has(i));
+      updSelBtn();
+    });
+    q('#cl-wselall').onclick = () => {
+      if (!shownJob) return;
+      const all = selSet.size === shownJob.rows.length;
+      selSet = all ? new Set() : new Set(shownJob.rows.map(r => r.i));
+      qa('.r[data-i]', q('#cl-win .cl-wbody')).forEach(r => r.classList.toggle('sel', !all));
+      q('#cl-wselall').textContent = all ? 'Выбрать всё' : 'Снять выделение';
+      updSelBtn();
+    };
+    q('#cl-wsel').onclick = () => { if (shownJob) downloadShown(shownJob.rows.filter(r => selSet.has(r.i)), '_выборка'); };
+    q('#cl-wall').onclick = () => { if (shownJob) downloadShown(shownJob.rows, ''); };
+
+    /* Вкладка «Лог Проверки» */
     q('#cl-logs').addEventListener('click', e => {
       const b = e.target.closest('button[data-act]');
       if (!b) return;
       const job = cfg('jobs').find(j => j.id === b.dataset.id);
       if (!job) return;
       if (b.dataset.act === 'open') showJob(job);
-      if (b.dataset.act === 'txt') download(`CustomLogs_${job.kind}_${fileDate(job.created)}.txt`, jobTxt(job, job.done ? 'готово' : 'остановлено'));
+      if (b.dataset.act === 'dl') download(`CustomLogs_${job.kind}_${fileDate(job.created)}.txt`, jobTxt(job, job.done ? 'готово' : 'остановлено'));
       if (b.dataset.act === 'resume') resumeJob(job.id);
       if (b.dataset.act === 'del') {
         setCfg('jobs', cfg('jobs').filter(j => j.id !== job.id));
@@ -2944,9 +3037,10 @@
     q('#cl-acc-passgo').onclick = changePass;
     q('#cl-ct-save').onclick = saveContacts;
     q('#cl-logout').onclick = logout;
+    q('#cl-delacc').onclick = openDel;
     bindUploader({
       zone: q('#cl-av-zone'), input: q('#cl-av-file'), urlInput: q('#cl-av-url'), urlBtn: q('#cl-av-urlgo'),
-      pasteBtn: q('#cl-av-paste'), status: q('#cl-av-msg'), maxMB: 1.5,
+      pasteBtn: q('#cl-av-paste'), status: q('#cl-av-msg'), maxMB: MAX_UPLOAD_MB,
       apply: async src => { const a = getAcc(); if (a) saveAcc(a.key, { avatar: src }); renderAuth(); },
     });
     q('#cl-av-reset').onclick = () => {
@@ -2956,7 +3050,7 @@
     };
     bindUploader({
       zone: q('#cl-bn-zone'), input: q('#cl-bn-file'), urlInput: q('#cl-bn-url'), urlBtn: q('#cl-bn-urlgo'),
-      pasteBtn: q('#cl-bn-paste'), status: q('#cl-bn-msg'), maxMB: 3,
+      pasteBtn: q('#cl-bn-paste'), status: q('#cl-bn-msg'), maxMB: MAX_UPLOAD_MB,
       apply: async src => { const a = getAcc(); if (a) saveAcc(a.key, { banner: src }); renderAuth(); },
     });
     q('#cl-bn-reset').onclick = () => {
@@ -2965,7 +3059,20 @@
       q('#cl-bn-msg').textContent = 'Баннер сброшен';
     };
 
-    /* Разработчик: тестовый режим ролей */
+    /* Удаление аккаунта */
+    const delBox = q('#cl-del');
+    delBox.addEventListener('click', e => {
+      const b = e.target.closest('button[data-d]');
+      if (!b) return;
+      const act = b.dataset.d;
+      if (act === 'cancel') return delBox.classList.remove('open');
+      if (act === 'close') return delBox.classList.remove('open');
+      if (act === 'next') { delBox.dataset.step = String(+delBox.dataset.step + 1); return renderDel(); }
+      if (act === 'del-no') return performDelete(false);
+      if (act === 'del-yes') return performDelete(true);
+    });
+
+    /* Для Разработчика: тестовый режим и выдача ролей */
     q('#cl-dev-on').onclick = () => {
       if (!isOwner()) return;
       setCfg('devRole', q('#cl-dev-role').value);
@@ -2975,12 +3082,19 @@
     const exitTest = () => { setCfg('devRole', ''); renderAuth(); activateTab('home', true); };
     q('#cl-dev-off').onclick = exitTest;
     q('#cl-test-exit').onclick = exitTest;
+    q('#cl-dev-give').onclick = giveRole;
 
-    /* Техничка: логи */
-    qa('.cl-banner-r').forEach(r => r.onchange = () => { setCfg('banner', r.value); setCfg('bgOn', false); applyBg(); renderBgPreview(); });
+    /* Настройки логов */
+    qa('.cl-banner-r').forEach(r => r.onchange = () => {
+      setCfg('banner', r.value);
+      applyBg(); renderBgPreview();
+      if (r.value === 'custom' && !cfg('bgUrl')) q('#cl-bg-msg').textContent = 'Сначала вставь свою картинку или gif';
+      else q('#cl-bg-msg').textContent = '';
+    });
     bindBgInput();
     q('#cl-bg-reset').onclick = () => {
-      setCfg('bgUrl', ''); setCfg('bgOn', false);
+      setCfg('bgUrl', '');
+      if (cfg('banner') === 'custom') setCfg('banner', '');
       applyBg(); renderBgPreview();
       q('#cl-bg-msg').textContent = 'Картинка сброшена';
     };
@@ -2991,8 +3105,13 @@
     };
     q('#cl-ipb').onchange = e => { setCfg('ipHide', e.target.checked); syncSite(true); };
     q('#cl-moneyb').onchange = e => { setCfg('moneyHide', e.target.checked); syncSite(true); };
+    q('#cl-dateb').onchange = e => { setCfg('dateHide', e.target.checked); syncSite(true); };
     qa('input[name="cl-per"]').forEach(r => r.onchange = () => setCfg('perReq', +r.value));
-    qa('input[name="cl-cd"]').forEach(r => r.onchange = () => setCfg('cd', +r.value));
+    q('#cl-cd-in').onchange = e => {
+      const v = Number(String(e.target.value).replace(',', '.'));
+      setCfg('cd', v >= CD_MIN && v <= CD_MAX ? v : CD_DEF);
+      e.target.value = cdSec();
+    };
     q('#cl-savelogs').onchange = e => setCfg('saveLogs', e.target.checked);
     q('#cl-savefile').onchange = e => setCfg('saveFile', e.target.checked);
     q('#cl-allowdl').onchange = e => {
@@ -3004,20 +3123,20 @@
     q('#cl-limon').onchange = e => { setCfg('limitOn', e.target.checked); applyLimit(); };
     q('#cl-reset-logs').onclick = resetLogsSettings;
 
-    /* Техничка: скрипт */
-    const setSec = q('#t-script');
-    setSec.addEventListener('click', e => {
+    /* Настройки скрипта: кастомизация */
+    const custSec = q('#t-s-cust');
+    custSec.addEventListener('click', e => {
       const c = e.target.closest('.th-c[data-c]');
       if (c) { setThemePart(c.dataset.key, c.dataset.slot, c.dataset.c); renderThemeSecs(); return; }
       const r = e.target.closest('.th-reset');
       if (r) { saveTheme({ [r.dataset.key]: { ...DEF_THEME[r.dataset.key] } }); renderThemeSecs(); }
     });
-    setSec.addEventListener('input', e => {
+    custSec.addEventListener('input', e => {
       if (!e.target.classList.contains('th-picker')) return;
       setThemePart(e.target.dataset.key, e.target.dataset.slot, e.target.value);
       e.target.closest('label').style.background = e.target.value;
     });
-    setSec.addEventListener('change', e => {
+    custSec.addEventListener('change', e => {
       if (e.target.classList.contains('th-picker')) return renderThemeSecs();
       if (!e.target.classList.contains('th-grad')) return;
       const key = e.target.dataset.key;
@@ -3025,18 +3144,13 @@
       renderThemeSecs();
     });
     q('#cl-stock').onclick = () => { saveTheme(STOCK_THEME); renderThemeSecs(); };
-    qa('input[name="cl-fxt"]').forEach(r => r.onchange = () => { setCfg('fx', { ...cfg('fx'), type: r.value }); renderFx(); });
-    q('#cl-fx-color').onchange = e => { setCfg('fx', { ...cfg('fx'), color: e.target.value }); renderFx(); };
-    q('#cl-fx-count').oninput = e => {
-      setCfg('fx', { ...cfg('fx'), count: +e.target.value });
-      q('#cl-fx-countv').textContent = e.target.value;
-      renderFx();
+    q('#cl-size-reset').onclick = () => {
+      setCfg('panelSize', null);
+      panel.style.width = ''; panel.style.height = '';
+      placePanel();
     };
-    q('#cl-fx-speed').oninput = e => {
-      setCfg('fx', { ...cfg('fx'), speed: +e.target.value });
-      q('#cl-fx-speedv').textContent = e.target.value;
-      renderFx();
-    };
+
+    /* Настройки скрипта: режим (персонажи) */
     qa('input[name="cl-char"]').forEach(r => r.onchange = () => {
       setCfg('char', r.value);
       if (cfg('charTheme')) applyCharTheme(charById(r.value));
@@ -3054,17 +3168,48 @@
       applyChar();
       keepBtn();
     };
+
+    /* Настройки скрипта: анимация */
+    qa('input[name="cl-fxt"]').forEach(r => r.onchange = () => { setCfg('fx', { ...cfg('fx'), type: r.value }); renderFx(); });
+    q('#cl-fx-color').onchange = e => { setCfg('fx', { ...cfg('fx'), color: e.target.value }); renderFx(); };
+    q('#cl-fx-count').oninput = e => {
+      setCfg('fx', { ...cfg('fx'), count: +e.target.value });
+      q('#cl-fx-countv').textContent = e.target.value;
+      renderFx();
+    };
+    q('#cl-fx-speed').oninput = e => {
+      setCfg('fx', { ...cfg('fx'), speed: +e.target.value });
+      q('#cl-fx-speedv').textContent = e.target.value;
+      renderFx();
+    };
+    q('#cl-fx-size').oninput = e => {
+      setCfg('fx', { ...cfg('fx'), size: +e.target.value });
+      q('#cl-fx-sizev').textContent = e.target.value;
+      renderFx();
+    };
     q('#cl-reset-script').onclick = resetScriptSettings;
 
-    /* Обновления */
+    /* О скрипте */
     q('#cl-upd-check').onclick = () => checkUpdate(true);
     q('#cl-upd-dl').onclick = () => window.open(UPDATE_URL, '_blank');
     q('#cl-autoupd').onchange = e => setCfg('autoUpd', e.target.checked);
     renderVersions();
 
+    renderHomeStars();
     syncSettingsUI();
     renderFx();
     renderAuth();
+  }
+
+  /* Список аккаунтов для выдачи ролей (только для Разработчика) */
+  function renderDevUsers() {
+    const sel = q('#cl-dev-user');
+    if (!sel) return;
+    const cur = sel.value;
+    sel.innerHTML = Object.entries(cfg('accounts'))
+      .filter(([k]) => k !== OWNER_NICK)
+      .map(([k, a]) => `<option value="${esc(k)}">${esc(a.nick)}</option>`).join('');
+    if (cur) sel.value = cur;
   }
 
   /* ---------- Запуск ---------- */
@@ -3086,12 +3231,12 @@
   applyLimit();
   refreshUpdate(true);
   setTimeout(showUpdatePopupIfNeeded, 1500);
-  migrateAccounts().then(() => { syncSettingsUI(); renderAuth(); });
+  migrateAccounts().then(() => {
+    touchSeen();
+    syncSettingsUI(); renderAuth();
+  });
 
-  // Предупреждение: незарегистрированным и давно не заходившим — один раз при запуске браузера
-  if (freshBrowser && (!isLogged() || inactive)) setTimeout(() => q('#cl-warn').classList.add('open'), 600);
-
-  // Приветствие: один раз при запуске браузера, а не при каждой новой вкладке
+  // Приветствие: один раз при запуске браузера
   if (freshBrowser && working()) {
     const nick = getAcc().nick;
     setTimeout(() => sayOrDefer(() => say(greetText(nick), 'ok', 9000)), 1200);
